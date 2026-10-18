@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Fichiers importés — Finance Perso{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Fichiers importés</h1>
+  <a href="/upload" class="btn-primary"><i class="fas fa-file-upload mr-1"></i> Importer</a>
+</div>
+
+<div class="card overflow-hidden p-0">
+  <div class="overflow-x-auto">
+    <table class="w-full">
+      <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600">
+        <tr>
+          <th class="table-header">Fichier</th>
+          <th class="table-header">Banque</th>
+          <th class="table-header">Importé le</th>
+          <th class="table-header">Lignes</th>
+          <th class="table-header">Importé par</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+        {% if files %}
+        {% for f in files %}
+        <tr class="hover:bg-gray-50 dark:hover:bg-slate-700">
+          <td class="table-cell">
+            <i class="fas fa-file-pdf text-red-400 mr-2"></i>{{ f.filename }}
+          </td>
+          <td class="table-cell text-gray-500">{{ f.bank_name }}</td>
+          <td class="table-cell text-gray-500 whitespace-nowrap">{{ f.imported_at }}</td>
+          <td class="table-cell text-center">{{ f.row_count }}</td>
+          <td class="table-cell text-gray-500">{{ f.importer_name }}</td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="5" class="text-center py-12 text-gray-400">
+            <i class="fas fa-inbox text-4xl mb-3 block"></i>
+            Aucun fichier importé.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

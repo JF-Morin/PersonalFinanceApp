@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Finance Perso{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold">Dashboard</h1>
+</div>
+
+<!-- Stat cards -->
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+  <div class="card text-center">
+    <div class="text-4xl font-bold text-indigo-600">{{ total_transactions }}</div>
+    <div class="text-sm text-gray-500 dark:text-gray-400 mt-1">Transactions totales</div>
+  </div>
+  <div class="card text-center">
+    <div class="text-4xl font-bold text-amber-500">{{ pending_count }}</div>
+    <div class="text-sm text-gray-500 dark:text-gray-400 mt-1">En attente</div>
+  </div>
+  <div class="card text-center">
+    <div class="text-4xl font-bold text-green-500">{{ total_files }}</div>
+    <div class="text-sm text-gray-500 dark:text-gray-400 mt-1">Fichiers importés</div>
+  </div>
+</div>
+
+<!-- Category chart -->
+{% if category_labels %}
+<div class="card">
+  <h2 class="text-lg font-semibold mb-4"><i class="fas fa-chart-pie text-indigo-500 mr-2"></i>Dépenses par catégorie</h2>
+  <div class="max-w-sm mx-auto">
+    <canvas id="categoryChart"></canvas>
+  </div>
+</div>
+
+<script>
+const ctx = document.getElementById('categoryChart');
+new Chart(ctx, {
+  type: 'doughnut',
+  data: {
+    labels: {{ category_labels | json_encode() | safe }},
+    datasets: [{
+      data: {{ category_totals | json_encode() | safe }},
+      backgroundColor: [
+        '#4f46e5','#7c3aed','#db2777','#ea580c','#ca8a04',
+        '#16a34a','#0891b2','#6366f1','#ec4899','#f59e0b'
+      ],
+    }]
+  },
+  options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+});
+</script>
+{% else %}
+<div class="card text-center text-gray-400 py-10">
+  <i class="fas fa-chart-pie text-4xl mb-3"></i>
+  <p>Aucune donnée à afficher. Importez des relevés pour voir les statistiques.</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,32 @@
+{% if transactions %}
+{% for t in transactions %}
+<tr class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
+  <td class="table-cell text-gray-500 whitespace-nowrap">{{ t.date }}</td>
+  <td class="table-cell max-w-xs truncate" title="{{ t.operation }}">{{ t.operation }}</td>
+  <td class="table-cell font-mono whitespace-nowrap {% if t.amount < 0 %}text-red-500{% else %}text-green-600{% endif %}">
+    {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | round(precision=2) }} {{ t.currency_symbol }}
+  </td>
+  <td class="table-cell text-gray-500">{{ t.category_name | default(value="—") }}</td>
+  <td class="table-cell">{{ t.paid_by_name }}</td>
+  <td class="table-cell text-gray-500">{{ t.other_share | default(value="—") }}{% if t.other_share %}%{% endif %}</td>
+  <td class="table-cell">
+    {% if t.status_name == "complete" %}
+    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+      <i class="fas fa-check"></i> Complète
+    </span>
+    {% else %}
+    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+      <i class="fas fa-clock"></i> En attente
+    </span>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+{% else %}
+<tr>
+  <td colspan="7" class="text-center py-12 text-gray-400">
+    <i class="fas fa-inbox text-4xl mb-3 block"></i>
+    Aucune transaction.
+  </td>
+</tr>
+{% endif %}

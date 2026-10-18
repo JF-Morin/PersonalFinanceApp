@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Importer un relevé — Finance Perso{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold">Importer un relevé PDF</h1>
+  <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+    Banques supportées :
+    {% for b in banks %}<strong>{{ b.name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+</div>
+
+<!-- #upload-result is the HTMX swap target: the server replaces its innerHTML
+     with _preview.html after parsing, without a full page reload. -->
+<div id="upload-result">
+  <div class="card max-w-xl" x-data="{ dragging: false, filename: 'Aucun fichier sélectionné' }">
+
+    <form hx-post="/upload"
+          hx-target="#upload-result"
+          hx-swap="innerHTML"
+          hx-encoding="multipart/form-data"
+          hx-indicator="#htmx-loader">
+
+      <div
+        class="border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer"
+        :class="dragging ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-300 dark:border-slate-600'"
+        @dragover.prevent="dragging = true"
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files; filename = $event.dataTransfer.files[0]?.name ?? 'Aucun fichier'"
+        @click="$refs.fileInput.click()"
+      >
+        <i class="fas fa-file-pdf text-5xl text-gray-300 dark:text-slate-500 mb-4"></i>
+        <p class="text-gray-500 dark:text-gray-400 text-sm">
+          Glissez un fichier PDF ici ou <span class="text-indigo-600 font-medium">cliquez pour choisir</span>
+        </p>
+        <p class="text-xs text-gray-400 mt-1" x-text="filename"></p>
+      </div>
+
+      <input type="file" name="file" accept=".pdf" required x-ref="fileInput" class="hidden"
+             @change="filename = $event.target.files[0]?.name ?? 'Aucun fichier'">
+
+      <div class="mt-4">
+        <button type="submit" class="btn-primary w-full">
+          <span class="htmx-indicator mr-1"><i class="fas fa-spinner fa-spin"></i></span>
+          <i class="fas fa-cog mr-1 htmx-indicator" style="display:none"></i>
+          <i class="fas fa-magnifying-glass mr-1"></i> Analyser le fichier
+        </button>
+      </div>
+    </form>
+
+  </div>
+</div>
+{% endblock %}

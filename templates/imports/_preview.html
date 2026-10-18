@@ -1,0 +1,57 @@
+{% if parse_error %}
+<div class="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+  <i class="fas fa-triangle-exclamation mr-2"></i>{{ parse_error }}
+</div>
+<a href="/upload" class="btn-secondary inline-flex items-center gap-2">
+  <i class="fas fa-arrow-left"></i> Réessayer
+</a>
+
+{% elif parsed_transactions %}
+<div class="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-green-700 dark:text-green-300 text-sm">
+  <i class="fas fa-check-circle mr-2"></i>
+  <strong>{{ parsed_transactions | length }} transactions</strong> détectées depuis
+  <strong>{{ bank_name }}</strong> — <em>{{ filename }}</em>
+</div>
+
+<div class="card overflow-hidden p-0 mb-4">
+  <div class="overflow-x-auto">
+    <table class="w-full">
+      <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600">
+        <tr>
+          <th class="table-header">Date</th>
+          <th class="table-header">Date valeur</th>
+          <th class="table-header">Opération</th>
+          <th class="table-header">Montant</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+        {% for t in parsed_transactions %}
+        <tr>
+          <td class="table-cell whitespace-nowrap text-gray-500">{{ t.date }}</td>
+          <td class="table-cell whitespace-nowrap text-gray-500">{{ t.transaction_date }}</td>
+          <td class="table-cell">{{ t.operation }}</td>
+          <td class="table-cell font-mono {% if t.amount < 0 %}text-red-500{% else %}text-green-600{% endif %}">
+            {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | round(precision=2) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="flex gap-3">
+  <a href="/upload" class="btn-secondary"><i class="fas fa-arrow-left mr-1"></i> Recommencer</a>
+  <form hx-post="/upload/confirm"
+        hx-indicator="#htmx-loader">
+    <input type="hidden" name="transactions_json" value="{{ transactions_json }}">
+    <input type="hidden" name="bank_id" value="{{ bank_id }}">
+    <input type="hidden" name="filename" value="{{ filename }}">
+    <input type="hidden" name="source_file" value="{{ source_file }}">
+    <button type="submit" class="btn-primary">
+      <span class="htmx-indicator mr-1"><i class="fas fa-spinner fa-spin"></i></span>
+      <i class="fas fa-database mr-1"></i> Confirmer l'import ({{ parsed_transactions | length }} transactions)
+    </button>
+  </form>
+</div>
+{% endif %}

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}À compléter — Finance Perso{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold">Transactions à compléter</h1>
+  <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+    Une transaction est complète quand la catégorie et la part de l'autre sont renseignées.
+  </p>
+</div>
+
+{% if transactions %}
+<div class="space-y-3">
+  {% for t in transactions %}
+  <div id="tx-{{ t.id }}" class="card" x-data="{ open: false }">
+    <div class="flex items-center justify-between gap-4 cursor-pointer" @click="open = !open">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="text-xs text-gray-400 whitespace-nowrap">{{ t.date }}</span>
+        <span class="font-medium truncate">{{ t.operation }}</span>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0">
+        <span class="font-mono {% if t.amount < 0 %}text-red-500{% else %}text-green-600{% endif %}">
+          {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | round(precision=2) }} {{ t.currency_symbol }}
+        </span>
+        <span class="text-gray-400 text-xs">{{ t.paid_by_name }}</span>
+        <i class="fas fa-chevron-down text-gray-400 transition-transform" :class="open && 'rotate-180'"></i>
+      </div>
+    </div>
+
+    <div x-show="open" x-cloak class="mt-4 border-t dark:border-slate-700 pt-4">
+      <form hx-post="/transactions/{{ t.id }}/update"
+            hx-target="#tx-{{ t.id }}"
+            hx-swap="outerHTML"
+            hx-indicator="#htmx-loader"
+            class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="label">Catégorie *</label>
+          <select name="category_id" required class="input">
+            <option value="">— Choisir —</option>
+            {% for c in categories %}
+            <option value="{{ c.id }}" {% if t.category_name == c.name %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label">Part de l'autre (%) *</label>
+          <input type="number" name="other_share" min="0" max="100" step="1"
+                 value="{{ t.other_share | default(value='50') }}" required class="input">
+        </div>
+        <div class="sm:col-span-2">
+          <label class="label">Notes</label>
+          <input type="text" name="notes" value="{{ t.notes | default(value='') }}" class="input" placeholder="Optionnel">
+        </div>
+        <div class="sm:col-span-2 flex gap-2 justify-end">
+          <button type="button" @click="open = false" class="btn-secondary">Annuler</button>
+          <button type="submit" name="mark_complete" value="0" class="btn-secondary">
+            <i class="fas fa-save mr-1"></i> Enregistrer
+          </button>
+          <button type="submit" name="mark_complete" value="1" class="btn-primary">
+            <i class="fas fa-check mr-1"></i> Marquer complète
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card text-center py-16 text-gray-400">
+  <i class="fas fa-check-circle text-5xl mb-4 text-green-400"></i>
+  <p class="text-lg font-medium text-gray-600 dark:text-gray-300">Tout est à jour !</p>
+  <p class="text-sm mt-1">Aucune transaction en attente.</p>
+</div>
+{% endif %}
+{% endblock %}

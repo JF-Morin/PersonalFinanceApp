@@ -1,0 +1,28 @@
+# ── Rust ──────────────────────────────────────────────────────────────────────
+/target/
+
+# ── Secrets & local config ────────────────────────────────────────────────────
+# .env contains COOKIE_SECRET and other sensitive values — never commit it.
+# Use .env.example (committed) as the template.
+.env
+.env.local
+.env.*.local
+
+# ── Runtime data (created automatically at startup) ───────────────────────────
+/data/          # SQLite database
+/logs/          # Rolling log files
+/storage/       # Ingested PDF statements (may contain real bank data)
+
+# ── Test PDFs ─────────────────────────────────────────────────────────────────
+# Drop real bank statement PDFs here to iterate on parsers.
+# The directory itself is tracked (via .gitkeep); its contents are not.
+/test/*
+!/test/.gitkeep
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

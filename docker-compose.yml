@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    image: personal-finance-app:latest
+    container_name: personal-finance-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: sqlite:/app/data/finance.db
+      STORAGE_PATH: /app/storage
+      LOG_PATH: /app/logs
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3000
+      COOKIE_SECRET: ${COOKIE_SECRET:-change-this-in-production-32bytes!!}
+      # Override log verbosity if needed: RUST_LOG=personal_finance_app=trace,tower_http=debug
+      RUST_LOG: ${RUST_LOG:-personal_finance_app=debug,tower_http=info}
+    volumes:
+      # SQLite database — persisted locally
+      - ./data:/app/data
+      # PDF statement storage — change the left side to your SMB mount path
+      # e.g. /mnt/user/PersonalFinanceApp:/app/storage
+      - ./storage:/app/storage
+      # Log files — one per day, named app.log.YYYY-MM-DD
+      - ./logs:/app/logs

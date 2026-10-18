@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Paramètres — Finance Perso{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold">Paramètres</h1>
+</div>
+
+<div class="space-y-6 max-w-2xl">
+
+  <!-- App settings -->
+  <div class="card">
+    <h2 class="text-lg font-semibold mb-4"><i class="fas fa-sliders text-indigo-500 mr-2"></i>Préférences</h2>
+    <form action="/settings" method="POST" class="space-y-4">
+      <div>
+        <label class="label">Thème</label>
+        <select name="theme" class="input">
+          <option value="light" {% if not is_dark %}selected{% endif %}>Clair</option>
+          <option value="dark"  {% if is_dark %}selected{% endif %}>Sombre</option>
+        </select>
+      </div>
+      <div>
+        <label class="label">Devise par défaut</label>
+        <select name="default_currency_id" class="input">
+          {% for c in currencies %}
+          <option value="{{ c.id }}" {% if c.id == default_currency_id %}selected{% endif %}>
+            {{ c.name }} ({{ c.symbol }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn-primary"><i class="fas fa-save mr-1"></i> Sauvegarder</button>
+    </form>
+  </div>
+
+  <!-- Users -->
+  <div class="card">
+    <h2 class="text-lg font-semibold mb-4"><i class="fas fa-users text-indigo-500 mr-2"></i>Utilisateurs</h2>
+    {% if users %}
+    <table class="w-full text-sm mb-4">
+      <thead><tr class="border-b dark:border-slate-700">
+        <th class="table-header text-left">Prénom</th>
+        <th class="table-header text-left">Nom</th>
+        <th class="table-header text-left">Banque par défaut</th>
+      </tr></thead>
+      <tbody>
+        {% for u in users %}
+        <tr class="border-b dark:border-slate-700">
+          <td class="table-cell">{{ u.name }}</td>
+          <td class="table-cell">{{ u.last_name | default(value="—") }}</td>
+          <td class="table-cell">
+            {% for b in banks %}{% if b.id == u.bank_id %}{{ b.name }}{% endif %}{% endfor %}
+            {% if not u.bank_id %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <details class="mt-2">
+      <summary class="cursor-pointer text-indigo-600 text-sm font-medium hover:underline">
+        <i class="fas fa-plus mr-1"></i> Ajouter un utilisateur
+      </summary>
+      <form action="/settings/users" method="POST" class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="label">Prénom *</label>
+          <input type="text" name="name" required class="input">
+        </div>
+        <div>
+          <label class="label">Nom</label>
+          <input type="text" name="last_name" class="input">
+        </div>
+        <div class="sm:col-span-2">
+          <label class="label">Banque par défaut</label>
+          <select name="bank_id" class="input">
+            <option value="">— Aucune —</option>
+            {% for b in banks %}
+            <option value="{{ b.id }}">{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <button type="submit" class="btn-primary"><i class="fas fa-plus mr-1"></i> Créer</button>
+        </div>
+      </form>
+    </details>
+  </div>
+
+  <!-- Banks reference -->
+  <div class="card">
+    <h2 class="text-lg font-semibold mb-3"><i class="fas fa-building-columns text-indigo-500 mr-2"></i>Banques supportées</h2>
+    <ul class="space-y-1 text-sm text-gray-600 dark:text-gray-300">
+      {% for b in banks %}
+      <li class="flex items-center gap-2">
+        <i class="fas fa-check text-green-500"></i> {{ b.name }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+</div>
+{% endblock %}
