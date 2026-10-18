@@ -8,6 +8,10 @@
 .env.local
 .env.*.local
 
+# Claude Code local settings — machine-specific permission overrides.
+# (.claude/settings.json is shared project config and IS committed.)
+.claude/settings.local.json
+
 # ── Runtime data (created automatically at startup) ───────────────────────────
 /data/          # SQLite database
 /logs/          # Rolling log files
