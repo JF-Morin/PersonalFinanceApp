@@ -50,7 +50,7 @@ pub async fn post_login(
 ) -> impl IntoResponse {
     let cookie = Cookie::build(("user_id", form.user_id.to_string()))
         .path("/")
-        .http_only(true)
+        .http_only(true) // not accessible from JS — prevents session hijacking via XSS
         .build();
     (jar.add(cookie), Redirect::to("/"))
 }

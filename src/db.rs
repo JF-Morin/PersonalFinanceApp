@@ -7,7 +7,9 @@ pub type DbPool = SqlitePool;
 pub async fn create_pool(database_url: &str) -> anyhow::Result<DbPool> {
     let options = SqliteConnectOptions::from_str(database_url)?
         .create_if_missing(true)
+        // WAL allows concurrent readers without blocking writers (HTMX sends several requests per page).
         .pragma("journal_mode", "WAL")
+        // SQLite ignores FK constraints by default; this pragma turns them on.
         .pragma("foreign_keys", "ON");
 
     let pool = SqlitePoolOptions::new()

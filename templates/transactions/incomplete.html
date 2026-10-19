@@ -9,6 +9,77 @@
   </p>
 </div>
 
+{% if broken_transactions %}
+<div class="mb-8">
+  <h2 class="text-lg font-semibold mb-1 text-amber-600 dark:text-amber-400">
+    <i class="fas fa-triangle-exclamation mr-2"></i>Lignes non analysées
+  </h2>
+  <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">
+    Ces lignes n'ont pas pu être analysées automatiquement. Corrigez l'opération et le montant, puis complétez-les.
+  </p>
+  <div class="space-y-3">
+    {% for t in broken_transactions %}
+    <div id="tx-{{ t.id }}" class="card border border-amber-200 dark:border-amber-700" x-data="{ open: false }">
+      <div class="flex items-center justify-between gap-4 cursor-pointer" @click="open = !open">
+        <div class="flex items-center gap-3 min-w-0">
+          <span class="text-xs text-amber-500 whitespace-nowrap"><i class="fas fa-triangle-exclamation mr-1"></i>{{ t.date }}</span>
+          <span class="font-medium truncate text-amber-700 dark:text-amber-300">{{ t.operation }}</span>
+        </div>
+        <div class="flex items-center gap-3 flex-shrink-0">
+          <i class="fas fa-chevron-down text-gray-400 transition-transform" :class="open && 'rotate-180'"></i>
+        </div>
+      </div>
+      {% if t.parse_note %}
+      <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">{{ t.parse_note }}</p>
+      {% endif %}
+      <div x-show="open" x-cloak class="mt-4 border-t dark:border-slate-700 pt-4">
+        <form hx-post="/transactions/{{ t.id }}/update"
+              hx-target="#tx-{{ t.id }}"
+              hx-swap="outerHTML"
+              hx-indicator="#htmx-loader"
+              class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="sm:col-span-2">
+            <label class="label">Opération *</label>
+            <input type="text" name="operation" value="{{ t.operation }}" required class="input">
+          </div>
+          <div>
+            <label class="label">Montant (négatif = débit) *</label>
+            <input type="number" name="amount" step="0.01" value="{{ t.amount }}" required class="input">
+          </div>
+          <div>
+            <label class="label">Catégorie</label>
+            <select name="category_id" class="input">
+              <option value="">— Choisir —</option>
+              {% for c in categories %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="label">Part de l'autre (%)</label>
+            <input type="number" name="other_share" min="0" max="100" step="1" value="50" class="input">
+          </div>
+          <div>
+            <label class="label">Notes</label>
+            <input type="text" name="notes" value="{{ t.notes | default(value='') }}" class="input" placeholder="Optionnel">
+          </div>
+          <div class="sm:col-span-2 flex gap-2 justify-end">
+            <button type="button" @click="open = false" class="btn-secondary">Annuler</button>
+            <button type="submit" name="mark_complete" value="0" class="btn-secondary">
+              <i class="fas fa-save mr-1"></i> Enregistrer comme en attente
+            </button>
+            <button type="submit" name="mark_complete" value="1" class="btn-primary">
+              <i class="fas fa-check mr-1"></i> Marquer complète
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {% if transactions %}
 <div class="space-y-3">
   {% for t in transactions %}
@@ -65,7 +136,7 @@
   </div>
   {% endfor %}
 </div>
-{% else %}
+{% elif not broken_transactions %}
 <div class="card text-center py-16 text-gray-400">
   <i class="fas fa-check-circle text-5xl mb-4 text-green-400"></i>
   <p class="text-lg font-medium text-gray-600 dark:text-gray-300">Tout est à jour !</p>

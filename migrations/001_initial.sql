@@ -54,14 +54,19 @@ CREATE TABLE IF NOT EXISTS transactions (
     other_share      REAL    CHECK(other_share IS NULL OR (other_share >= 0 AND other_share <= 100)),
     status_id        INTEGER NOT NULL REFERENCES transaction_status(id),
     from_file_id     INTEGER NOT NULL REFERENCES imported_files(id),
-    notes            TEXT
+    notes            TEXT,
+    -- Set by parsers when a line could not be fully parsed; cleared once the user corrects it.
+    parse_note       TEXT
 );
 
 -- Seed data
-INSERT OR IGNORE INTO transaction_status (id, name) VALUES (1, 'pending'), (2, 'complete');
+INSERT OR IGNORE INTO transaction_status (id, name) VALUES
+    (1, 'pending'),
+    (2, 'complete'),
+    (3, 'broken');   -- parser emitted a line it couldn't fully parse; needs manual correction
 
 INSERT OR IGNORE INTO currencies (id, name, symbol)
-VALUES (1, 'Euro', '€'), (2, 'US Dollar', '$'), (3, 'British Pound', '£');
+VALUES (1, 'Euro', '€'), (2, 'US Dollar', '$'), (3, 'Canadian Dollar', 'CA$');
 
 INSERT OR IGNORE INTO banks (id, name) VALUES (1, 'BNP Paribas'), (2, 'Crédit Mutuel');
 

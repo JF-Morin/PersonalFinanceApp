@@ -83,7 +83,7 @@ pub async fn post_upload(
 
     tracing::info!(filename = %original_name, bytes = %bytes.len(), user_id = %user_id, "PDF upload received");
 
-    // Extract text from PDF in a blocking thread
+    // pdf_extract is CPU-bound; spawn_blocking keeps it off the async executor.
     let bytes_clone = bytes.clone();
     let text = tokio::task::spawn_blocking(move || {
         pdf_extract::extract_text_from_mem(&bytes_clone)
@@ -120,6 +120,8 @@ pub async fn post_upload(
     let transactions_json = serde_json::to_string(&transactions)
         .map_err(|e| AppError::Other(e.to_string()))?;
 
+    let broken_count = transactions.iter().filter(|t| t.parse_note.is_some()).count();
+
     let mut ctx = tera::Context::new();
     ctx.insert("parse_error", &Option::<String>::None);
     ctx.insert("parsed_transactions", &Some(&transactions));
@@ -129,6 +131,7 @@ pub async fn post_upload(
     ctx.insert("filename", &safe_name);
     ctx.insert("source_file", &relative_path);
     ctx.insert("user_id", &user_id);
+    ctx.insert("broken_count", &broken_count);
 
     let html = state.tera.render("imports/_preview.html", &ctx)?;
     Ok(Html(html).into_response())
@@ -172,9 +175,10 @@ pub async fn post_confirm_import(
     .await?;
 
     for tx in &transactions {
+        let status_id: i64 = if tx.parse_note.is_some() { 3 } else { 1 };
         sqlx::query(
-            "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, paid_by, status_id, from_file_id)
-             VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, paid_by, status_id, from_file_id, parse_note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&tx.date)
         .bind(&tx.transaction_date)
@@ -182,7 +186,9 @@ pub async fn post_confirm_import(
         .bind(tx.amount)
         .bind(default_currency_id)
         .bind(user_id)
+        .bind(status_id)
         .bind(file_id)
+        .bind(&tx.parse_note)
         .execute(&state.db)
         .await?;
     }

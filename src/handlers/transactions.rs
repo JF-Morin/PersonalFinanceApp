@@ -55,20 +55,11 @@ pub async fn get_incomplete(
     jar: CookieJar,
 ) -> AppResult<Html<String>> {
     let mut ctx = base_context(&jar, &state.db).await?;
-    let current_user_id = super::get_user_id(&jar)?;
 
     let filter = TransactionFilter::default();
     let all_incomplete = fetch_transaction_views(&state.db, true, &filter).await?;
-
-    // Show only transactions paid by the current user
-    let my_transactions: Vec<&TransactionView> = all_incomplete
-        .iter()
-        .filter(|t| {
-            // get paid_by from the view — need to join; for now show all pending
-            true
-        })
-        .collect();
-    let _ = current_user_id;
+    let (broken_transactions, pending_transactions): (Vec<TransactionView>, Vec<TransactionView>) =
+        all_incomplete.into_iter().partition(|t| t.status_name == "broken");
 
     let categories = sqlx::query_as::<_, Category>("SELECT * FROM categories ORDER BY name")
         .fetch_all(&state.db)
@@ -80,8 +71,8 @@ pub async fn get_incomplete(
         .fetch_all(&state.db)
         .await?;
 
-    ctx.insert("transactions", &all_incomplete);
-    ctx.insert("my_transactions", &my_transactions);
+    ctx.insert("broken_transactions", &broken_transactions);
+    ctx.insert("transactions", &pending_transactions);
     ctx.insert("categories", &categories);
     ctx.insert("users", &users);
     ctx.insert("currencies", &currencies);
@@ -92,6 +83,8 @@ pub async fn get_incomplete(
 
 #[derive(Deserialize)]
 pub struct UpdateTransactionForm {
+    pub operation: Option<String>,
+    pub amount: Option<f64>,
     pub category_id: Option<i64>,
     pub other_share: Option<f64>,
     pub notes: Option<String>,
@@ -113,16 +106,33 @@ pub async fn post_update_transaction(
 
     let status_id: i64 = if marking_complete { 2 } else { 1 };
 
-    sqlx::query(
-        "UPDATE transactions SET category_id = ?, other_share = ?, notes = ?, status_id = ? WHERE id = ?",
-    )
-    .bind(form.category_id)
-    .bind(form.other_share)
-    .bind(&form.notes)
-    .bind(status_id)
-    .bind(id)
-    .execute(&state.db)
-    .await?;
+    // operation/amount are only submitted from the broken-transaction fix form.
+    if form.operation.is_some() || form.amount.is_some() {
+        // COALESCE keeps the stored value if the field was somehow omitted; parse_note is cleared.
+        sqlx::query(
+            "UPDATE transactions SET operation = COALESCE(?, operation), amount = COALESCE(?, amount), category_id = ?, other_share = ?, notes = ?, status_id = ?, parse_note = NULL WHERE id = ?",
+        )
+        .bind(form.operation.as_deref())
+        .bind(form.amount)
+        .bind(form.category_id)
+        .bind(form.other_share)
+        .bind(&form.notes)
+        .bind(status_id)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE transactions SET category_id = ?, other_share = ?, notes = ?, status_id = ? WHERE id = ?",
+        )
+        .bind(form.category_id)
+        .bind(form.other_share)
+        .bind(&form.notes)
+        .bind(status_id)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    }
 
     if is_htmx(&headers) {
         if marking_complete {
@@ -210,14 +220,16 @@ async fn fetch_transaction_views(
     pending_only: bool,
     filter: &TransactionFilter,
 ) -> AppResult<Vec<TransactionView>> {
-    let status_filter = if pending_only { "AND s.name = 'pending'" } else { "" };
+    // 'broken' transactions surface here so the user can correct them; 'complete' are excluded.
+    let status_filter = if pending_only { "AND s.name IN ('pending', 'broken')" } else { "" };
     let sql = format!(
         r#"
         SELECT t.id, t.date, t.transaction_date, t.operation, t.amount,
                cur.symbol AS currency_symbol,
                cat.name   AS category_name,
                u.name || COALESCE(' ' || u.last_name, '') AS paid_by_name,
-               t.other_share, s.name AS status_name, t.notes, t.from_file_id
+               t.other_share, s.name AS status_name, t.notes, t.from_file_id,
+               t.parse_note
         FROM transactions t
         JOIN currencies cur ON t.currency_id = cur.id
         LEFT JOIN categories cat ON t.category_id = cat.id
@@ -230,18 +242,19 @@ async fn fetch_transaction_views(
 
     let rows = sqlx::query_as::<
         _,
-        (i64, String, String, String, f64, String, Option<String>, String, Option<f64>, String, Option<String>, i64),
+        (i64, String, String, String, f64, String, Option<String>, String, Option<f64>, String, Option<String>, i64, Option<String>),
     >(&sql)
     .fetch_all(db)
     .await?;
 
     let mut views: Vec<TransactionView> = rows
         .into_iter()
-        .map(|(id, date, td, op, amt, csym, cat, pby, share, sname, notes, fid)| {
+        .map(|(id, date, td, op, amt, csym, cat, pby, share, sname, notes, fid, parse_note)| {
             TransactionView {
                 id, date, transaction_date: td, operation: op, amount: amt,
                 currency_symbol: csym, category_name: cat, paid_by_name: pby,
                 other_share: share, status_name: sname, notes, from_file_id: fid,
+                parse_note,
             }
         })
         .collect();

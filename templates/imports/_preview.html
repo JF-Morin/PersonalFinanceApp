@@ -13,6 +13,13 @@
   <strong>{{ bank_name }}</strong> — <em>{{ filename }}</em>
 </div>
 
+{% if broken_count > 0 %}
+<div class="mb-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-700 dark:text-amber-300 text-sm">
+  <i class="fas fa-triangle-exclamation mr-2"></i>
+  <strong>{{ broken_count }} ligne(s) non analysée(s)</strong> — marquées en orange ci-dessous. Vous pourrez les corriger manuellement après l'import.
+</div>
+{% endif %}
+
 <div class="card overflow-hidden p-0 mb-4">
   <div class="overflow-x-auto">
     <table class="w-full">
@@ -26,12 +33,19 @@
       </thead>
       <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
         {% for t in parsed_transactions %}
-        <tr>
+        <tr {% if t.parse_note %}class="bg-amber-50 dark:bg-amber-900/10"{% endif %}>
           <td class="table-cell whitespace-nowrap text-gray-500">{{ t.date }}</td>
           <td class="table-cell whitespace-nowrap text-gray-500">{{ t.transaction_date }}</td>
-          <td class="table-cell">{{ t.operation }}</td>
-          <td class="table-cell font-mono {% if t.amount < 0 %}text-red-500{% else %}text-green-600{% endif %}">
-            {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | round(precision=2) }}
+          <td class="table-cell">
+            {{ t.operation }}
+            {% if t.parse_note %}
+            <div class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+              <i class="fas fa-triangle-exclamation mr-1"></i>{{ t.parse_note }}
+            </div>
+            {% endif %}
+          </td>
+          <td class="table-cell font-mono {% if t.amount < 0 %}text-red-500{% elif t.amount > 0 %}text-green-600{% else %}text-amber-500{% endif %}">
+            {% if t.amount < 0 %}−{% elif t.amount > 0 %}+{% endif %}{{ t.amount | abs | round(precision=2) }}
           </td>
         </tr>
         {% endfor %}

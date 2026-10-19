@@ -77,6 +77,9 @@ pub struct ParsedTransaction {
     pub transaction_date: String,
     pub operation: String,
     pub amount: f64,
+    // serde(default) so the JSON round-trip in the import-confirm form survives a missing key.
+    #[serde(default)]
+    pub parse_note: Option<String>,
 }
 
 /// Enriched transaction for display (joins bank/category/user names).
@@ -94,6 +97,7 @@ pub struct TransactionView {
     pub status_name: String,
     pub notes: Option<String>,
     pub from_file_id: i64,
+    pub parse_note: Option<String>, // non-null means the transaction still needs manual correction
 }
 
 /// Balance owed between two users.

@@ -39,7 +39,8 @@ pub async fn get_home(
         let share = row.other_share.unwrap_or(0.0) / 100.0;
         let owed = row.amount.abs() * share;
 
-        // Find the "other" user (everyone except payer)
+        // Assumes two users: "the other" is anyone who didn't pay.
+        // With more users this would split the share equally, which may not be desired.
         for other in &all_users {
             if other.id != row.paid_by {
                 let key = (other.id, row.paid_by, row.currency_id);
@@ -60,7 +61,7 @@ pub async fn get_home(
         .collect();
 
     for ((from_id, to_id, currency_id), amount) in debts {
-        if amount.abs() > 0.005 {
+        if amount.abs() > 0.005 { // skip sub-cent rounding noise
             balances.push(Balance {
                 from_user: user_names.get(&from_id).cloned().unwrap_or_default(),
                 to_user: user_names.get(&to_id).cloned().unwrap_or_default(),
