@@ -23,3 +23,5 @@ services:
       - ./storage:/app/storage
       # Log files — one per day, named app.log.YYYY-MM-DD
       - ./logs:/app/logs
+      # Templates — mount for live edits without a full rebuild
+      - ./templates:/app/templates

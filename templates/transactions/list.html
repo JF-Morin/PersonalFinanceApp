@@ -7,6 +7,80 @@
   <a href="/upload" class="btn-primary"><i class="fas fa-file-upload mr-1"></i> Importer</a>
 </div>
 
+<!-- Toast -->
+<div id="tx-toast" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;z-index:1000"
+     class="bg-green-600 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2">
+  <i class="fas fa-check-circle"></i><span id="tx-toast-msg"></span>
+</div>
+
+<!-- Edit modal -->
+<div id="edit-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.5)"
+     class="flex items-center justify-center p-4">
+  <div class="card max-w-lg w-full">
+    <h2 class="text-lg font-semibold mb-4">Modifier la transaction</h2>
+    <form id="edit-form" class="grid grid-cols-2 gap-3">
+      <input type="hidden" id="edit-tx-id">
+      <div>
+        <label class="label">Date</label>
+        <input type="date" name="date" id="edit-date" class="input w-full">
+      </div>
+      <div class="col-span-2">
+        <label class="label">Opération</label>
+        <input type="text" name="operation" id="edit-operation" class="input w-full">
+      </div>
+      <div>
+        <label class="label">Montant</label>
+        <input type="number" name="amount" id="edit-amount" step="0.01" class="input w-full">
+      </div>
+      <div>
+        <label class="label">Devise</label>
+        <select name="currency_id" id="edit-currency" class="input w-full">
+          {% for c in currencies %}
+          <option value="{{ c.id }}">{{ c.name }} ({{ c.symbol }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label">Catégorie</label>
+        <select name="category_id" id="edit-category" class="input w-full">
+          <option value="">—</option>
+          {% for c in categories %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label">Part de l'autre (%)</label>
+        <input type="number" name="other_share" id="edit-share" min="0" max="100" step="1" class="input w-full">
+      </div>
+      <div class="col-span-2">
+        <label class="label">Notes</label>
+        <input type="text" name="notes" id="edit-notes" class="input w-full">
+      </div>
+      <div id="edit-error" class="col-span-2 text-red-500 text-sm" style="display:none"></div>
+      <div class="col-span-2 flex gap-2 justify-end mt-1">
+        <button type="button" id="edit-cancel" class="btn-secondary">Annuler</button>
+        <button type="submit" class="btn-primary"><i class="fas fa-save mr-1"></i> Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete confirmation modal -->
+<div id="del-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.5)"
+     class="flex items-center justify-center p-4">
+  <div class="card max-w-sm w-full">
+    <h2 class="text-lg font-semibold mb-2">Supprimer la transaction ?</h2>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-5" id="del-modal-op"></p>
+    <div class="flex gap-2 justify-end">
+      <button id="del-cancel" class="btn-secondary">Annuler</button>
+      <button id="del-confirm" class="btn-primary" style="background:#dc2626;border-color:#dc2626">
+        <i class="fas fa-trash mr-1"></i> Supprimer
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- Filters -->
 <div class="card mb-4">
   <form hx-get="/transactions"
@@ -41,48 +115,122 @@
         <tr>
           <th class="table-header">Date</th>
           <th class="table-header">Opération</th>
-          <th class="table-header">Montant</th>
           <th class="table-header">Catégorie</th>
           <th class="table-header">Payé par</th>
           <th class="table-header">Part</th>
           <th class="table-header">Statut</th>
+          <th class="table-header text-right">Montant</th>
+          <th class="table-header"></th>
         </tr>
       </thead>
       <tbody id="tx-tbody" class="divide-y divide-gray-100 dark:divide-slate-700">
-        {% if transactions %}
-        {% for t in transactions %}
-        <tr class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
-          <td class="table-cell text-gray-500 whitespace-nowrap">{{ t.date }}</td>
-          <td class="table-cell max-w-xs truncate" title="{{ t.operation }}">{{ t.operation }}</td>
-          <td class="table-cell font-mono whitespace-nowrap {% if t.amount < 0 %}text-red-500{% else %}text-green-600{% endif %}">
-            {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | round(precision=2) }} {{ t.currency_symbol }}
-          </td>
-          <td class="table-cell text-gray-500">{{ t.category_name | default(value="—") }}</td>
-          <td class="table-cell">{{ t.paid_by_name }}</td>
-          <td class="table-cell text-gray-500">{{ t.other_share | default(value="—") }}{% if t.other_share %}%{% endif %}</td>
-          <td class="table-cell">
-            {% if t.status_name == "complete" %}
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
-              <i class="fas fa-check"></i> Complète
-            </span>
-            {% else %}
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
-              <i class="fas fa-clock"></i> En attente
-            </span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-        {% else %}
-        <tr>
-          <td colspan="7" class="text-center py-12 text-gray-400">
-            <i class="fas fa-inbox text-4xl mb-3 block"></i>
-            Aucune transaction.
-          </td>
-        </tr>
-        {% endif %}
+        {% include "transactions/_tx_rows.html" %}
       </tbody>
     </table>
   </div>
 </div>
+
+<script>
+(function () {
+  var currentUserId = {{ current_user_id }};
+  var delTxId = null;
+
+  // ── Edit modal ──────────────────────────────────────────────────────────────
+  var editModal   = document.getElementById('edit-modal');
+  var editForm    = document.getElementById('edit-form');
+  var editError   = document.getElementById('edit-error');
+  var editCancel  = document.getElementById('edit-cancel');
+
+  function openEdit(btn) {
+    document.getElementById('edit-tx-id').value       = btn.dataset.id;
+    document.getElementById('edit-date').value        = btn.dataset.date;
+    document.getElementById('edit-operation').value   = btn.dataset.operation;
+    document.getElementById('edit-amount').value      = btn.dataset.amount;
+    document.getElementById('edit-currency').value    = btn.dataset.currencyId;
+    document.getElementById('edit-category').value    = btn.dataset.categoryId || '';
+    document.getElementById('edit-share').value       = btn.dataset.share || '';
+    document.getElementById('edit-notes').value       = btn.dataset.notes || '';
+    editError.style.display = 'none';
+    editModal.style.display = 'flex';
+  }
+
+  editCancel.addEventListener('click', function () { editModal.style.display = 'none'; });
+  editModal.addEventListener('click', function (e) {
+    if (e.target === editModal) editModal.style.display = 'none';
+  });
+
+  editForm.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var id = document.getElementById('edit-tx-id').value;
+    var params = new URLSearchParams(new FormData(editForm));
+    params.delete(''); // remove empty name field if any
+    try {
+      var r    = await fetch('/transactions/' + id + '/update', { method: 'POST', body: params });
+      var data = await r.json();
+      if (data.ok) {
+        editModal.style.display = 'none';
+        showToast('Transaction modifiée.');
+        setTimeout(function () { window.location.reload(); }, 800);
+      } else {
+        editError.textContent = data.error || 'Erreur lors de la modification.';
+        editError.style.display = '';
+      }
+    } catch (err) {
+      editError.textContent = 'Erreur réseau : ' + err.message;
+      editError.style.display = '';
+    }
+  });
+
+  // ── Delete modal ─────────────────────────────────────────────────────────────
+  var delModal   = document.getElementById('del-modal');
+  var delConfirm = document.getElementById('del-confirm');
+  var delCancel  = document.getElementById('del-cancel');
+  var delOp      = document.getElementById('del-modal-op');
+
+  function openDelete(btn) {
+    delTxId = btn.dataset.id;
+    delOp.textContent = btn.dataset.operation;
+    delModal.style.display = 'flex';
+  }
+
+  delCancel.addEventListener('click', function () { delModal.style.display = 'none'; });
+  delModal.addEventListener('click', function (e) {
+    if (e.target === delModal) delModal.style.display = 'none';
+  });
+
+  delConfirm.addEventListener('click', async function () {
+    if (!delTxId) return;
+    delModal.style.display = 'none';
+    try {
+      var r    = await fetch('/transactions/' + delTxId + '/delete', { method: 'POST' });
+      var data = await r.json();
+      if (data.ok) {
+        var row = document.getElementById('tx-row-' + delTxId);
+        if (row) row.remove();
+        showToast('Transaction supprimée.');
+      } else {
+        alert('Erreur : ' + (data.error || 'Suppression échouée'));
+      }
+    } catch (err) {
+      alert('Erreur réseau : ' + err.message);
+    }
+  });
+
+  // ── Button delegation (handles rows added by HTMX) ──────────────────────────
+  document.getElementById('tx-tbody').addEventListener('click', function (e) {
+    var btn = e.target.closest('.btn-edit-tx');
+    if (btn) { openEdit(btn); return; }
+    btn = e.target.closest('.btn-del-tx');
+    if (btn) { openDelete(btn); }
+  });
+
+  // ── Toast ────────────────────────────────────────────────────────────────────
+  function showToast(msg) {
+    var t = document.getElementById('tx-toast');
+    document.getElementById('tx-toast-msg').textContent = msg;
+    t.style.display = 'flex';
+    setTimeout(function () { t.style.display = 'none'; }, 3500);
+  }
+})();
+</script>
 {% endblock %}

@@ -2,19 +2,50 @@
 {% block title %}Paramètres — Finance Perso{% endblock %}
 
 {% block content %}
+<!--
+  Outer Alpine scope drives the user-edit modal.
+  Getters (pwFull, pwValid, profileChanged, canSave) keep the save button logic clean.
+-->
+<div x-data="{
+  editModal: false,
+  editUser: { id: '', name: '', last_name: '', bank_id: '', hasPw: false },
+  origName: '', origLast: '', origBank: '',
+  oldPw: '', newPw: '', newPwc: '',
+  get pwFull() {
+    if (!this.editUser.hasPw)
+      return !!(this.newPw && this.newPwc && this.newPw === this.newPwc);
+    return !!(this.oldPw && this.newPw && this.newPwc && this.newPw === this.newPwc);
+  },
+  get pwEmpty() { return !this.oldPw && !this.newPw && !this.newPwc; },
+  get pwValid() { return this.pwEmpty || this.pwFull; },
+  get profileChanged() {
+    return this.editUser.name !== this.origName ||
+           this.editUser.last_name !== this.origLast ||
+           this.editUser.bank_id !== this.origBank;
+  },
+  get canSave() { return this.pwValid && (this.profileChanged || this.pwFull); }
+}">
+
 <div class="mb-6">
-  <h1 class="text-2xl font-bold">Paramètres</h1>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Paramètres</h1>
 </div>
 
 <div class="space-y-6 max-w-2xl">
 
-  <!-- App settings -->
+  <!-- App preferences — auto-save on change -->
   <div class="card">
-    <h2 class="text-lg font-semibold mb-4"><i class="fas fa-sliders text-indigo-500 mr-2"></i>Préférences</h2>
-    <form action="/settings" method="POST" class="space-y-4">
+    <h2 class="text-base font-semibold mb-5 flex items-center gap-2 text-gray-900 dark:text-gray-100">
+      <i class="fas fa-sliders text-primary-600"></i> Préférences
+    </h2>
+    <form id="pref-form"
+          hx-post="/settings"
+          hx-trigger="change delay:200ms"
+          hx-swap="none"
+          class="space-y-4">
       <div>
         <label class="label">Thème</label>
-        <select name="theme" class="input">
+        <select name="theme" class="input"
+                onchange="document.documentElement.classList.toggle('dark', this.value === 'dark')">
           <option value="light" {% if not is_dark %}selected{% endif %}>Clair</option>
           <option value="dark"  {% if is_dark %}selected{% endif %}>Sombre</option>
         </select>
@@ -29,40 +60,134 @@
           {% endfor %}
         </select>
       </div>
-      <button type="submit" class="btn-primary"><i class="fas fa-save mr-1"></i> Sauvegarder</button>
+      <div id="pref-saved" class="hidden items-center gap-2 text-green-600 dark:text-green-400 text-sm font-medium">
+        <i class="fas fa-check-circle"></i> Sauvegardé
+      </div>
     </form>
+    <script>
+      htmx.on('#pref-form', 'htmx:afterRequest', function() {
+        var el = document.getElementById('pref-saved');
+        el.classList.remove('hidden');
+        el.classList.add('flex');
+        setTimeout(function() { el.classList.add('hidden'); el.classList.remove('flex'); }, 2000);
+      });
+    </script>
   </div>
+
+  <!-- Feedback banners for password operations (from modal redirect) -->
+  {% if pw_changed %}
+  <div class="flex items-center gap-3 bg-green-50 dark:bg-green-900/30
+              border border-green-200 dark:border-green-700 rounded-xl px-4 py-3
+              text-green-700 dark:text-green-300 text-sm">
+    <i class="fas fa-check-circle flex-shrink-0"></i>
+    Mot de passe modifié avec succès.
+  </div>
+  {% endif %}
+  {% if pw_error %}
+  <div class="flex items-center gap-3 bg-red-50 dark:bg-red-900/30
+              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
+              text-red-700 dark:text-red-300 text-sm">
+    <i class="fas fa-circle-xmark flex-shrink-0"></i>
+    {% if pw_error == "wrong" %}Mot de passe actuel incorrect.
+    {% elif pw_error == "mismatch" %}Les nouveaux mots de passe ne correspondent pas.
+    {% elif pw_error == "empty" %}Le nouveau mot de passe ne peut pas être vide.
+    {% else %}Une erreur est survenue.{% endif %}
+  </div>
+  {% endif %}
 
   <!-- Users -->
   <div class="card">
-    <h2 class="text-lg font-semibold mb-4"><i class="fas fa-users text-indigo-500 mr-2"></i>Utilisateurs</h2>
+    <h2 class="text-base font-semibold mb-5 flex items-center gap-2 text-gray-900 dark:text-gray-100">
+      <i class="fas fa-users text-primary-600"></i> Utilisateurs
+    </h2>
+
     {% if users %}
-    <table class="w-full text-sm mb-4">
-      <thead><tr class="border-b dark:border-slate-700">
-        <th class="table-header text-left">Prénom</th>
-        <th class="table-header text-left">Nom</th>
-        <th class="table-header text-left">Banque par défaut</th>
-      </tr></thead>
-      <tbody>
-        {% for u in users %}
-        <tr class="border-b dark:border-slate-700">
-          <td class="table-cell">{{ u.name }}</td>
-          <td class="table-cell">{{ u.last_name | default(value="—") }}</td>
-          <td class="table-cell">
-            {% for b in banks %}{% if b.id == u.bank_id %}{{ b.name }}{% endif %}{% endfor %}
-            {% if not u.bank_id %}—{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="rounded-xl overflow-hidden border border-gray-200 dark:border-slate-600 mb-5">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 dark:bg-slate-700/60">
+          <tr class="border-b border-gray-200 dark:border-slate-600">
+            <th class="table-header">Prénom</th>
+            <th class="table-header">Nom</th>
+            <th class="table-header">Banque</th>
+            <th class="table-header">MDP</th>
+            <th class="table-header w-20"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+          {% for u in users %}
+          <tr id="user-row-{{ u.id }}">
+            <td class="table-cell font-medium text-gray-900 dark:text-gray-100">{{ u.name }}</td>
+            <td class="table-cell text-gray-600 dark:text-gray-300">{{ u.last_name | default(value="—") }}</td>
+            <td class="table-cell text-gray-500 dark:text-gray-400">
+              {% for b in banks %}{% if b.id == u.bank_id %}{{ b.name }}{% endif %}{% endfor %}
+              {% if not u.bank_id %}—{% endif %}
+            </td>
+            <td class="table-cell">
+              {% if u.password_hash %}
+              <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400
+                           bg-green-50 dark:bg-green-900/30 px-2 py-0.5 rounded-full">
+                <i class="fas fa-lock text-[10px]"></i> Défini
+              </span>
+              {% else %}
+              <span class="text-xs text-gray-400 dark:text-gray-500">Aucun</span>
+              {% endif %}
+            </td>
+            <td class="table-cell">
+              <div class="flex items-center gap-1">
+                <button
+                  data-uid="{{ u.id }}"
+                  data-uname="{{ u.name }}"
+                  data-ulast="{{ u.last_name | default(value='') }}"
+                  data-ubank="{{ u.bank_id | default(value='') }}"
+                  data-uhaspw="{% if u.password_hash %}1{% else %}0{% endif %}"
+                  @click="
+                    const n = $el.dataset.uname, l = $el.dataset.ulast, b = $el.dataset.ubank;
+                    editUser = { id: $el.dataset.uid, name: n, last_name: l, bank_id: b, hasPw: $el.dataset.uhaspw === '1' };
+                    origName = n; origLast = l; origBank = b;
+                    oldPw = ''; newPw = ''; newPwc = '';
+                    editModal = true
+                  "
+                  class="w-8 h-8 flex items-center justify-center rounded-full
+                         text-gray-400 dark:text-gray-500
+                         hover:text-primary-600 dark:hover:text-primary-400
+                         hover:bg-primary-50 dark:hover:bg-primary-900/20
+                         transition-colors"
+                  title="Modifier">
+                  <i class="fas fa-pen text-xs"></i>
+                </button>
+                <button
+                  hx-delete="/settings/users/{{ u.id }}"
+                  hx-confirm="Supprimer {{ u.name }} ? Cette action est irréversible."
+                  hx-target="#user-row-{{ u.id }}"
+                  hx-swap="outerHTML"
+                  hx-indicator="#htmx-loader"
+                  class="w-8 h-8 flex items-center justify-center rounded-full
+                         text-red-400 dark:text-red-400
+                         hover:text-red-600 dark:hover:text-red-500
+                         hover:bg-red-50 dark:hover:bg-red-900/20
+                         transition-colors"
+                  title="Supprimer">
+                  <i class="fas fa-trash-can text-xs"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% endif %}
 
-    <details class="mt-2">
-      <summary class="cursor-pointer text-indigo-600 text-sm font-medium hover:underline">
-        <i class="fas fa-plus mr-1"></i> Ajouter un utilisateur
+    <!-- Add user form -->
+    <details class="group">
+      <summary class="flex items-center gap-2 cursor-pointer select-none list-none
+                      text-primary-600 dark:text-primary-400 text-sm font-semibold">
+        <i class="fas fa-plus-circle transition-transform duration-200 group-open:rotate-45"></i>
+        Ajouter un utilisateur
       </summary>
-      <form action="/settings/users" method="POST" class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <form action="/settings/users" method="POST"
+            class="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700
+                   grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label class="label">Prénom *</label>
           <input type="text" name="name" required class="input">
@@ -71,7 +196,7 @@
           <label class="label">Nom</label>
           <input type="text" name="last_name" class="input">
         </div>
-        <div class="sm:col-span-2">
+        <div>
           <label class="label">Banque par défaut</label>
           <select name="bank_id" class="input">
             <option value="">— Aucune —</option>
@@ -80,8 +205,15 @@
             {% endfor %}
           </select>
         </div>
+        <div>
+          <label class="label">Mot de passe</label>
+          <input type="password" name="password" class="input" placeholder="Optionnel"
+                 autocomplete="new-password">
+        </div>
         <div class="sm:col-span-2">
-          <button type="submit" class="btn-primary"><i class="fas fa-plus mr-1"></i> Créer</button>
+          <button type="submit" class="btn-primary">
+            <i class="fas fa-plus"></i> Créer
+          </button>
         </div>
       </form>
     </details>
@@ -89,15 +221,136 @@
 
   <!-- Banks reference -->
   <div class="card">
-    <h2 class="text-lg font-semibold mb-3"><i class="fas fa-building-columns text-indigo-500 mr-2"></i>Banques supportées</h2>
-    <ul class="space-y-1 text-sm text-gray-600 dark:text-gray-300">
+    <h2 class="text-base font-semibold mb-4 flex items-center gap-2 text-gray-900 dark:text-gray-100">
+      <i class="fas fa-building-columns text-primary-600"></i> Banques supportées
+    </h2>
+    <ul class="space-y-2">
       {% for b in banks %}
-      <li class="flex items-center gap-2">
-        <i class="fas fa-check text-green-500"></i> {{ b.name }}
+      <li class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300">
+        <span class="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-check text-green-600 dark:text-green-400 text-[10px]"></i>
+        </span>
+        {{ b.name }}
       </li>
       {% endfor %}
     </ul>
   </div>
 
+</div><!-- /space-y-6 -->
+
+
+<!-- ── User edit modal ─────────────────────────────────────────── -->
+<div x-show="editModal"
+     x-cloak
+     class="fixed inset-0 z-50 flex items-center justify-center p-4">
+
+  <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+       @click="editModal = false"></div>
+
+  <div class="relative w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto"
+       @click.stop>
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-5">
+      <div class="flex items-center gap-3">
+        <span class="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/50
+                     text-primary-600 dark:text-primary-400 font-bold text-sm
+                     flex items-center justify-center flex-shrink-0"
+              x-text="editUser.name ? editUser.name.charAt(0).toUpperCase() : '?'">
+        </span>
+        <div>
+          <div class="font-bold text-gray-900 dark:text-gray-100 text-sm"
+               x-text="editUser.name || 'Utilisateur'"></div>
+          <div class="text-xs text-gray-400 dark:text-gray-500">Modifier le profil</div>
+        </div>
+      </div>
+      <button @click="editModal = false"
+              class="w-8 h-8 flex items-center justify-center rounded-full
+                     text-gray-400 hover:text-gray-600 dark:hover:text-gray-200
+                     hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors border-none cursor-pointer">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <form :action="'/settings/users/' + editUser.id + '/edit'" method="POST"
+          class="space-y-4">
+
+      <!-- Profile -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label">Prénom *</label>
+          <input type="text" name="name" x-model="editUser.name" required class="input"
+                 autocomplete="given-name">
+        </div>
+        <div>
+          <label class="label">Nom</label>
+          <input type="text" name="last_name" x-model="editUser.last_name" class="input"
+                 autocomplete="family-name">
+        </div>
+      </div>
+
+      <div>
+        <label class="label">Banque</label>
+        <select name="bank_id" class="input"
+                x-model="editUser.bank_id">
+          <option value="">— Aucune —</option>
+          {% for b in banks %}
+          <option value="{{ b.id }}">{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Password section -->
+      <div class="border-t border-gray-100 dark:border-slate-700 pt-4">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500 mb-3">
+          Mot de passe
+          <span class="normal-case font-normal">(laisser vide pour ne pas modifier)</span>
+        </p>
+        <div class="space-y-3">
+          <!-- Old password — only shown when the user already has one -->
+          <div x-show="editUser.hasPw">
+            <label class="label">Mot de passe actuel</label>
+            <input type="password" name="old_password" x-model="oldPw"
+                   class="input" placeholder="••••••••" autocomplete="current-password">
+          </div>
+          <div>
+            <label class="label">Nouveau mot de passe</label>
+            <input type="password" name="new_password" x-model="newPw"
+                   class="input" placeholder="••••••••" autocomplete="new-password">
+          </div>
+          <div>
+            <label class="label">Confirmer</label>
+            <input type="password" name="new_password_confirm" x-model="newPwc"
+                   class="input" placeholder="••••••••" autocomplete="new-password">
+            <p x-show="newPwc.length > 0 && newPw !== newPwc" x-cloak
+               class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+              <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex gap-3 pt-1">
+        <button type="button" @click="editModal = false"
+                class="flex-1 py-2.5 rounded-lg text-sm font-semibold
+                       bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600
+                       text-gray-700 dark:text-gray-200 border-none cursor-pointer transition-colors">
+          Annuler
+        </button>
+        <button type="submit"
+                :disabled="!canSave"
+                class="flex-1 py-2.5 rounded-lg text-sm font-semibold
+                       bg-indigo-600 hover:bg-indigo-700 text-white
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       border-none cursor-pointer transition-colors shadow-md">
+          <i class="fas fa-check mr-1"></i> Enregistrer
+        </button>
+      </div>
+
+    </form>
+  </div>
 </div>
+
+</div><!-- /x-data wrapper -->
 {% endblock %}

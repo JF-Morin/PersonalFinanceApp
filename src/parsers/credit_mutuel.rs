@@ -1,4 +1,4 @@
-use super::{parse_european_amount, BankParser};
+use super::{lopdf_text::TextItem, parse_european_amount, BankParser};
 use crate::models::ParsedTransaction;
 use anyhow::Result;
 use regex::Regex;
@@ -82,6 +82,148 @@ impl BankParser for CreditMutuelParser {
         tracing::debug!(count = transactions.len(), "Crédit Mutuel parser finished");
         Ok(transactions)
     }
+
+    fn detect_positioned(&self, items: &[TextItem]) -> Option<bool> {
+        Some(items.iter().any(|i| {
+            i.text.contains("CREDIT MUTUEL")
+                || i.text.contains("Crédit Mutuel")
+                || i.text.contains("CAISSE CREDIT MUTUEL")
+        }))
+    }
+
+    fn parse_positioned(&self, items: &[TextItem]) -> Option<Result<Vec<ParsedTransaction>>> {
+        Some(parse_from_positioned(items))
+    }
+}
+
+/// Parse Credit Mutuel transactions directly from positioned text items (lopdf fallback).
+///
+/// Column layout from PDF analysis (in points):
+///   Date1:       X ≈  52 – 99
+///   Date2:       X ≈ 100 – 147
+///   Operation:   X ≈ 148 – 429
+///   Debit:       X ≈ 430 – 489
+///   Credit:      X ≥ 490
+fn parse_from_positioned(items: &[TextItem]) -> Result<Vec<ParsedTransaction>> {
+    let date_re = Regex::new(r"^\d{2}/\d{2}/\d{4}$")?;
+    // Matches any header/footer text that must never be treated as a transaction
+    // or continuation line.
+    let skip_re = Regex::new(
+        r"(?i)(solde\s+cr[eé]diteur|solde\s+d[eé]biteur|total\s+mensuel|total\s+des\s+frais|\
+r[eé]f\s*:|opération|d[eé]bit\s+euros|cr[eé]dit\s+euros|sous\s+r[eé]serve|libell[eé]|\
+iban\s*:|page\s+\d|ccm\s+grenoble|avenue\s+alsace|creditmutuel|bic\s*:)",
+    )?;
+
+    // Sort by page first, then top-to-bottom (Y descending within page), then left-to-right.
+    // This is critical: without the page key, items from different pages at the same Y
+    // coordinate get merged into the same row.
+    let mut sorted = items.to_vec();
+    sorted.sort_by(|a, b| {
+        a.page
+            .cmp(&b.page)
+            .then(b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal))
+            .then(a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    // Group into rows: new row when Y changes by more than 3 pt OR page changes.
+    let mut rows: Vec<Vec<&TextItem>> = Vec::new();
+    let mut current_y = f64::MAX;
+    let mut current_page = usize::MAX;
+
+    for item in &sorted {
+        if (item.y - current_y).abs() > 3.0 || item.page != current_page {
+            rows.push(Vec::new());
+            current_y = item.y;
+            current_page = item.page;
+        }
+        rows.last_mut().unwrap().push(item);
+    }
+
+    let mut transactions: Vec<ParsedTransaction> = Vec::new();
+    let mut pending: Option<(String, String, f64, Vec<String>, Option<String>)> = None;
+
+    for row in &rows {
+        let mut cols: Vec<(&f64, &str)> = row.iter().map(|i| (&i.x, i.text.as_str())).collect();
+        cols.sort_by(|a, b| a.0.partial_cmp(b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Skip rows that are entirely header/footer text
+        let full_row = cols.iter().map(|(_, t)| *t).collect::<Vec<_>>().join(" ");
+        if skip_re.is_match(&full_row) {
+            flush(&mut pending, &mut transactions);
+            continue;
+        }
+
+        let dates: Vec<&&f64> = cols
+            .iter()
+            .filter(|(x, t)| **x < 150.0 && date_re.is_match(t))
+            .map(|(x, _)| x)
+            .collect();
+
+        if dates.len() >= 2 {
+            flush(&mut pending, &mut transactions);
+
+            let date1 = cols.iter().find(|(x, t)| **x < 100.0 && date_re.is_match(t)).map(|(_, t)| *t);
+            let date2 = cols.iter().find(|(x, t)| **x >= 100.0 && **x < 150.0 && date_re.is_match(t)).map(|(_, t)| *t);
+
+            let op_parts: Vec<&str> = cols
+                .iter()
+                .filter(|(x, t)| **x >= 140.0 && **x < 430.0 && !skip_re.is_match(t))
+                .map(|(_, t)| *t)
+                .collect();
+            let op_text = op_parts.join(" ");
+
+            let debit: Option<f64> = cols
+                .iter()
+                .filter(|(x, _)| **x >= 430.0 && **x < 490.0)
+                .filter_map(|(_, t)| parse_european_amount(t))
+                .next();
+            let credit: Option<f64> = cols
+                .iter()
+                .filter(|(x, _)| **x >= 490.0)
+                .filter_map(|(_, t)| parse_european_amount(t))
+                .next();
+
+            if let (Some(d1), Some(d2)) = (date1, date2) {
+                let date = convert_date(d1);
+                let valeur = convert_date(d2);
+
+                match (debit, credit) {
+                    (Some(a), _) => {
+                        pending = Some((date, valeur, -a, vec![op_text], None));
+                    }
+                    (None, Some(a)) => {
+                        pending = Some((date, valeur, a, vec![op_text], None));
+                    }
+                    (None, None) => {
+                        let raw = cols.iter().map(|(_, t)| *t).collect::<Vec<_>>().join(" ");
+                        transactions.push(ParsedTransaction {
+                            date: date.clone(),
+                            transaction_date: date,
+                            operation: raw.clone(),
+                            amount: 0.0,
+                            parse_note: Some(format!("Montant introuvable : {}", raw)),
+                        });
+                    }
+                }
+            }
+        } else if let Some((_, _, _, ref mut ops, _)) = pending {
+            // Continuation line: only text in the operation column range
+            let continuation: Vec<&str> = cols
+                .iter()
+                .filter(|(x, t)| **x >= 140.0 && **x < 430.0 && !skip_re.is_match(t))
+                .map(|(_, t)| *t)
+                .collect();
+            let s = continuation.join(" ");
+            let s = s.trim();
+            if !s.is_empty() {
+                ops.push(s.to_string());
+            }
+        }
+    }
+
+    flush(&mut pending, &mut transactions);
+    tracing::debug!(count = transactions.len(), "Crédit Mutuel positioned parser finished");
+    Ok(transactions)
 }
 
 fn flush(pending: &mut Option<(String, String, f64, Vec<String>, Option<String>)>, out: &mut Vec<ParsedTransaction>) {

@@ -10,22 +10,22 @@ pub async fn get_dashboard(
 ) -> AppResult<Html<String>> {
     let mut ctx = base_context(&jar, &state.db).await?;
 
-    let total_transactions = sqlx::query_scalar!("SELECT COUNT(*) FROM transactions")
+    let total_transactions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
         .fetch_one(&state.db)
         .await?;
 
-    let total_files = sqlx::query_scalar!("SELECT COUNT(*) FROM imported_files")
+    let total_files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM imported_files")
         .fetch_one(&state.db)
         .await?;
 
-    let pending_count = sqlx::query_scalar!(
+    let pending_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM transactions t JOIN transaction_status s ON t.status_id = s.id WHERE s.name = 'pending'"
     )
     .fetch_one(&state.db)
     .await?;
 
     // Spending by category (debit only, complete transactions)
-    let by_category = sqlx::query!(
+    let by_category: Vec<(Option<String>, Option<f64>)> = sqlx::query_as(
         r#"
         SELECT COALESCE(c.name, 'Non catégorisé') AS category, SUM(ABS(t.amount)) AS total
         FROM transactions t
@@ -41,10 +41,10 @@ pub async fn get_dashboard(
     .await?;
 
     let category_labels: Vec<String> = by_category.iter()
-        .map(|r| r.category.clone().unwrap_or_else(|| "Non catégorisé".into()))
+        .map(|(cat, _)| cat.clone().unwrap_or_else(|| "Non catégorisé".into()))
         .collect();
     let category_totals: Vec<f64> = by_category.iter()
-        .map(|r| r.total.unwrap_or(0.0))
+        .map(|(_, tot)| tot.unwrap_or(0.0))
         .collect();
 
     ctx.insert("total_transactions", &total_transactions);

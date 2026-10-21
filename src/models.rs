@@ -6,6 +6,7 @@ pub struct User {
     pub name: String,
     pub last_name: Option<String>,
     pub bank_id: Option<i64>,
+    pub password_hash: Option<String>,
 }
 
 impl User {
@@ -91,13 +92,16 @@ pub struct TransactionView {
     pub operation: String,
     pub amount: f64,
     pub currency_symbol: String,
+    pub currency_id: i64,
     pub category_name: Option<String>,
+    pub category_id: Option<i64>,
     pub paid_by_name: String,
+    pub paid_by_id: i64,
     pub other_share: Option<f64>,
     pub status_name: String,
     pub notes: Option<String>,
     pub from_file_id: i64,
-    pub parse_note: Option<String>, // non-null means the transaction still needs manual correction
+    pub parse_note: Option<String>,
 }
 
 /// Balance owed between two users.

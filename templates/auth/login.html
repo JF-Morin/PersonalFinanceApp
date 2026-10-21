@@ -2,48 +2,389 @@
 <html lang="fr" class="{% if is_dark %}dark{% endif %} h-full">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Connexion — Finance Perso</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+
+    /* ── User selection button ───────────────────────────────── */
+    .user-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.875rem 1rem;
+      border-radius: 0.75rem;
+      border: 2px solid #e5e7eb;
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 150ms, background-color 150ms, transform 80ms;
+    }
+    .dark .user-btn                  { border-color: #475569; }
+    .user-btn:hover                  { border-color: #6366f1; background-color: #eef2ff; }
+    .dark .user-btn:hover            { border-color: #818cf8; background-color: rgba(99,102,241,0.08); }
+    .user-btn:active                 { transform: scale(0.985); }
+    .user-btn.amber                  { border-color: #fde68a; }
+    .dark .user-btn.amber            { border-color: #78350f; }
+    .user-btn.amber:hover            { border-color: #f59e0b; background-color: #fffbeb; }
+    .dark .user-btn.amber:hover      { border-color: #f59e0b; background-color: rgba(245,158,11,0.08); }
+
+    /* ── Text inputs & selects ───────────────────────────────── */
+    .field {
+      width: 100%;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      background-color: #ffffff;
+      color: #111827;
+      border: 2px solid #d1d5db;
+      outline: none;
+      transition: border-color 150ms, box-shadow 150ms;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .field:focus {
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 3px rgba(79,70,229,0.12);
+    }
+    .field::placeholder              { color: #9ca3af; }
+    .dark .field {
+      background-color: #1e293b;
+      color: #f1f5f9;
+      border-color: #475569;
+    }
+    .dark .field:focus {
+      border-color: #818cf8;
+      box-shadow: 0 0 0 3px rgba(129,140,248,0.15);
+    }
+    .dark .field::placeholder        { color: #64748b; }
+
+    /* ── Label ───────────────────────────────────────────────── */
+    .lbl {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6b7280;
+      margin-bottom: 0.375rem;
+    }
+    .dark .lbl                       { color: #94a3b8; }
+
+    /* ── Buttons ─────────────────────────────────────────────── */
+    .btn-indigo {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.375rem;
+      padding: 0.625rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      background-color: #4f46e5;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background-color 150ms;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+    .btn-indigo:hover                { background-color: #4338ca; }
+    .btn-indigo:active               { background-color: #312e81; }
+    .btn-indigo:disabled             { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-amber {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.375rem;
+      padding: 0.625rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      background-color: #f59e0b;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background-color 150ms;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+    .btn-amber:hover                 { background-color: #d97706; }
+    .btn-amber:disabled              { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-ghost {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.625rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      background-color: #f1f5f9;
+      color: #374151;
+      border: none;
+      cursor: pointer;
+      transition: background-color 150ms;
+    }
+    .btn-ghost:hover                 { background-color: #e2e8f0; }
+    .dark .btn-ghost                 { background-color: #334155; color: #e2e8f0; }
+    .dark .btn-ghost:hover           { background-color: #475569; }
+
+    .btn-full-indigo {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      background-color: #4f46e5;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background-color 150ms;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+    .btn-full-indigo:hover           { background-color: #4338ca; }
+    .btn-full-indigo:disabled        { opacity: 0.4; cursor: not-allowed; }
+  </style>
 </head>
-<body class="bg-gray-50 dark:bg-slate-900 flex items-center justify-center h-full">
 
-<div class="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-10 w-full max-w-md">
+<!--
+  Single x-data scope wrapping the whole page so user-list buttons and the
+  modal overlay share the same state without cross-scope event dispatch.
+    modal: null | 'verify' | 'set'
+    sel:   null | { id, name }
+    pw, pwc — controlled password inputs
+-->
+<body class="bg-gray-50 dark:bg-slate-900 min-h-full flex items-center justify-center p-4"
+      x-data="{ modal: null, sel: null, pw: '', pwc: '' }">
+
+<div class="w-full max-w-sm">
+
+  <!-- App identity -->
   <div class="text-center mb-8">
-    <i class="fas fa-wallet text-5xl text-indigo-600 mb-3"></i>
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Finance Perso</h1>
-    <p class="text-gray-500 dark:text-gray-400 mt-1 text-sm">Sélectionnez votre profil pour continuer</p>
+    <div class="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
+      <i class="fas fa-wallet text-2xl text-white"></i>
+    </div>
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">Finance Perso</h1>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+      {% if users %}Sélectionnez votre profil{% else %}Bienvenue !{% endif %}
+    </p>
   </div>
 
-  {% if users %}
-  <div class="space-y-3">
-    {% for user in users %}
-    <form action="/login" method="POST">
-      <input type="hidden" name="user_id" value="{{ user.id }}">
-      <button type="submit"
-        class="w-full flex items-center gap-4 px-5 py-4 rounded-xl border-2 border-gray-200 dark:border-slate-600 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-slate-700 transition-all text-left">
-        <div class="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-indigo-600 font-bold text-lg">
-          {{ user.name | slice(end=1) | upper }}
-        </div>
-        <div>
-          <div class="font-semibold text-gray-900 dark:text-white">
-            {{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}
-          </div>
-        </div>
-        <i class="fas fa-chevron-right ml-auto text-gray-400"></i>
-      </button>
-    </form>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="text-center py-8 text-gray-500 dark:text-gray-400">
-    <i class="fas fa-users text-4xl mb-3 text-gray-300"></i>
-    <p>Aucun utilisateur trouvé.</p>
-    <p class="text-sm mt-2">Créez un utilisateur dans <a href="/settings" class="text-indigo-600 hover:underline">Paramètres</a>.</p>
+  <!-- Error banner -->
+  {% if login_error %}
+  <div class="mb-4 flex items-center gap-3 bg-red-50 dark:bg-red-900/30
+              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
+              text-red-700 dark:text-red-300 text-sm">
+    <i class="fas fa-circle-xmark flex-shrink-0"></i>
+    Mot de passe incorrect. Réessayez.
   </div>
   {% endif %}
-</div>
+
+  <!-- Main card -->
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6">
+
+    {% if users %}
+    <!-- ── User selection list ──────────────────────────────── -->
+    <div class="space-y-2">
+      {% for user in users %}
+
+      {% if user.has_password %}
+      <!-- Returning user → verify password modal -->
+      <button type="button" class="user-btn"
+              @click="sel = { id: {{ user.id }}, name: '{{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}' }; pw = ''; modal = 'verify'">
+        <span class="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 flex items-center
+                     justify-center text-indigo-600 dark:text-indigo-400 font-bold flex-shrink-0 text-sm">
+          {{ user.name | upper | truncate(length=1, end="") }}
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+            {{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}
+          </div>
+          <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            <i class="fas fa-lock text-[10px] mr-0.5"></i> Protégé
+          </div>
+        </div>
+        <i class="fas fa-chevron-right text-gray-300 dark:text-slate-600 text-xs"></i>
+      </button>
+
+      {% else %}
+      <!-- First login → set password modal -->
+      <button type="button" class="user-btn amber"
+              @click="sel = { id: {{ user.id }}, name: '{{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}' }; pw = ''; pwc = ''; modal = 'set'">
+        <span class="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/50 flex items-center
+                     justify-center text-amber-600 dark:text-amber-400 font-bold flex-shrink-0 text-sm">
+          {{ user.name | upper | truncate(length=1, end="") }}
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+            {{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}
+          </div>
+          <div class="text-xs text-amber-500 dark:text-amber-400 mt-0.5">
+            <i class="fas fa-triangle-exclamation text-[10px] mr-0.5"></i> Mot de passe à définir
+          </div>
+        </div>
+        <i class="fas fa-chevron-right text-gray-300 dark:text-slate-600 text-xs"></i>
+      </button>
+      {% endif %}
+
+      {% endfor %}
+    </div>
+
+    {% else %}
+    <!-- ── First run: create first user ────────────────────── -->
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 leading-relaxed">
+      Aucun profil n'existe encore. Créez le vôtre pour commencer.
+    </p>
+
+    <form action="/settings/users" method="POST"
+          x-data="{ fpw: '', fpwc: '' }"
+          class="space-y-4">
+      <input type="hidden" name="redirect_to" value="/login">
+
+      <div>
+        <label class="lbl">Prénom *</label>
+        <input type="text" name="name" required class="field" placeholder="ex : Jean"
+               autocomplete="given-name">
+      </div>
+      <div>
+        <label class="lbl">Nom</label>
+        <input type="text" name="last_name" class="field" placeholder="Optionnel"
+               autocomplete="family-name">
+      </div>
+      {% if banks %}
+      <div>
+        <label class="lbl">Banque</label>
+        <select name="bank_id" class="field">
+          <option value="">— Aucune —</option>
+          {% for b in banks %}
+          <option value="{{ b.id }}">{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div>
+        <label class="lbl">Mot de passe *</label>
+        <input type="password" name="password" required x-model="fpw"
+               class="field" placeholder="Choisissez un mot de passe"
+               autocomplete="new-password">
+      </div>
+      <div>
+        <label class="lbl">Confirmer le mot de passe *</label>
+        <input type="password" name="password_confirm" x-model="fpwc"
+               class="field" placeholder="Répétez le mot de passe"
+               autocomplete="new-password">
+        <p x-show="fpwc.length > 0 && fpw !== fpwc" x-cloak
+           class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+          <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+        </p>
+      </div>
+
+      <button type="submit" class="btn-full-indigo" :disabled="!fpw || fpw !== fpwc">
+        <i class="fas fa-user-plus"></i> Créer mon profil
+      </button>
+    </form>
+    {% endif %}
+
+  </div><!-- /card -->
+</div><!-- /centered wrapper -->
+
+
+<!-- ── Modal overlay (fixed, covers viewport) ────────────────── -->
+<div x-show="modal !== null"
+     x-cloak
+     class="fixed inset-0 z-50 flex items-center justify-center p-4">
+
+  <!-- Backdrop -->
+  <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+       @click="modal = null"></div>
+
+  <!-- Modal card -->
+  <div class="relative w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6"
+       @click.stop>
+
+    <!-- User identity -->
+    <div class="flex items-center gap-3 mb-5">
+      <span class="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg flex-shrink-0"
+            :class="modal === 'set'
+              ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400'
+              : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400'"
+            x-text="sel ? sel.name.charAt(0).toUpperCase() : ''">
+      </span>
+      <div>
+        <div class="font-bold text-gray-900 dark:text-gray-100 text-sm"
+             x-text="sel ? sel.name : ''"></div>
+        <div class="text-xs mt-0.5"
+             :class="modal === 'set' ? 'text-amber-500 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'"
+             x-text="modal === 'set' ? 'Définissez votre mot de passe' : 'Entrez votre mot de passe'">
+        </div>
+      </div>
+    </div>
+
+    <!-- Verify password form -->
+    <div x-show="modal === 'verify'">
+      <form action="/login" method="POST">
+        <input type="hidden" name="user_id" :value="sel ? sel.id : ''">
+        <div class="mb-4">
+          <label class="lbl">Mot de passe</label>
+          <input type="password" name="password" x-model="pw"
+                 class="field" placeholder="••••••••" required
+                 autocomplete="current-password">
+        </div>
+        <div class="flex gap-3">
+          <button type="button" @click="modal = null" class="btn-ghost">Annuler</button>
+          <button type="submit" class="btn-indigo">
+            <i class="fas fa-arrow-right-to-bracket"></i> Connexion
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Set password form (first login) -->
+    <div x-show="modal === 'set'">
+      <form action="/login" method="POST">
+        <input type="hidden" name="user_id" :value="sel ? sel.id : ''">
+        <div class="space-y-3 mb-4">
+          <div>
+            <label class="lbl">Nouveau mot de passe</label>
+            <input type="password" name="new_password" x-model="pw"
+                   class="field" placeholder="Choisissez un mot de passe" required
+                   autocomplete="new-password">
+          </div>
+          <div>
+            <label class="lbl">Confirmer</label>
+            <input type="password" name="new_password_confirm" x-model="pwc"
+                   class="field" placeholder="Répétez le mot de passe"
+                   autocomplete="new-password">
+            <p x-show="pwc.length > 0 && pw !== pwc" x-cloak
+               class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+              <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+            </p>
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <button type="button" @click="modal = null" class="btn-ghost">Annuler</button>
+          <button type="submit" class="btn-amber" :disabled="!pw || pw !== pwc">
+            <i class="fas fa-key"></i> Définir &amp; se connecter
+          </button>
+        </div>
+      </form>
+    </div>
+
+  </div><!-- /modal card -->
+</div><!-- /modal overlay -->
 
 </body>
 </html>

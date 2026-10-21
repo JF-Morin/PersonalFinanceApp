@@ -10,17 +10,19 @@
 <!-- Balances card -->
 <div class="card mb-6">
   <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-    <i class="fas fa-scale-balanced text-indigo-500"></i> Soldes entre utilisateurs
+    <i class="fas fa-scale-balanced text-primary-600"></i> Soldes entre utilisateurs
     <span class="text-xs text-gray-400 font-normal ml-1">(transactions complètes uniquement)</span>
   </h2>
 
   {% if balances %}
   <div class="space-y-3">
     {% for b in balances %}
-    <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-700 rounded-lg">
+    <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-700/60 rounded-xl">
       <div class="flex items-center gap-3">
-        <i class="fas fa-arrow-right text-orange-400"></i>
-        <span>
+        <span class="w-8 h-8 rounded-full bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center">
+          <i class="fas fa-arrow-right text-orange-500 text-xs"></i>
+        </span>
+        <span class="text-sm">
           <strong>{{ b.from_user }}</strong>
           <span class="text-gray-500 dark:text-gray-400 mx-1">doit à</span>
           <strong>{{ b.to_user }}</strong>
@@ -40,7 +42,7 @@
 <!-- Quick stats -->
 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
   <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center text-amber-600 text-xl">
+    <div class="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-amber-600 text-xl flex-shrink-0">
       <i class="fas fa-clock"></i>
     </div>
     <div>
@@ -51,7 +53,7 @@
   </div>
 
   <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-indigo-600 text-xl">
+    <div class="w-12 h-12 rounded-2xl bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center text-primary-600 text-xl flex-shrink-0">
       <i class="fas fa-file-upload"></i>
     </div>
     <div>
@@ -62,13 +64,14 @@
   </div>
 </div>
 
-<!-- Manual transaction modal trigger -->
+<!-- Manual transaction -->
 <div class="card" x-data="{ open: false }">
-  <button @click="open = !open" class="flex items-center gap-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium">
+  <button @click="open = !open"
+          class="flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-semibold">
     <i class="fas fa-plus-circle"></i> Ajouter une transaction manuelle
   </button>
 
-  <div x-show="open" x-cloak class="mt-4 border-t dark:border-slate-700 pt-4">
+  <div x-show="open" x-cloak class="mt-4 border-t dark:border-slate-700 pt-5">
     <form hx-post="/transactions/manual"
           hx-indicator="#htmx-loader"
           class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -85,6 +88,16 @@
         <input type="number" name="amount" step="0.01" required class="input">
       </div>
       <div>
+        <label class="label">Devise</label>
+        <select name="currency_id" class="input">
+          {% for c in currencies %}
+          <option value="{{ c.id }}" {% if c.id == default_currency_id %}selected{% endif %}>
+            {{ c.name }} ({{ c.symbol }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
         <label class="label">Part de l'autre (%)</label>
         <input type="number" name="other_share" min="0" max="100" step="1" class="input" placeholder="50">
       </div>
@@ -92,9 +105,9 @@
         <label class="label">Notes</label>
         <input type="text" name="notes" class="input" placeholder="Optionnel">
       </div>
-      <div class="sm:col-span-2 flex gap-2 justify-end">
+      <div class="sm:col-span-2 flex gap-3 justify-end">
         <button type="button" @click="open = false" class="btn-secondary">Annuler</button>
-        <button type="submit" class="btn-primary"><i class="fas fa-save mr-1"></i> Enregistrer</button>
+        <button type="submit" class="btn-primary"><i class="fas fa-save"></i> Enregistrer</button>
       </div>
     </form>
   </div>

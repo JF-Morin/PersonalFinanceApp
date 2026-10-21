@@ -13,6 +13,13 @@
   <strong>{{ bank_name }}</strong> — <em>{{ filename }}</em>
 </div>
 
+{% if already_imported_at %}
+<div class="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+  <i class="fas fa-triangle-exclamation mr-2"></i>
+  <strong>Ce fichier a déjà été importé</strong> le {{ already_imported_at }}. Confirmer créera des doublons.
+</div>
+{% endif %}
+
 {% if broken_count > 0 %}
 <div class="mb-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-700 dark:text-amber-300 text-sm">
   <i class="fas fa-triangle-exclamation mr-2"></i>
@@ -62,6 +69,7 @@
     <input type="hidden" name="bank_id" value="{{ bank_id }}">
     <input type="hidden" name="filename" value="{{ filename }}">
     <input type="hidden" name="source_file" value="{{ source_file }}">
+    <input type="hidden" name="content_hash" value="{{ content_hash }}">
     <button type="submit" class="btn-primary">
       <span class="htmx-indicator mr-1"><i class="fas fa-spinner fa-spin"></i></span>
       <i class="fas fa-database mr-1"></i> Confirmer l'import ({{ parsed_transactions | length }} transactions)

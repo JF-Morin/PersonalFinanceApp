@@ -28,7 +28,16 @@ pub async fn get_current_user(jar: &CookieJar, db: &DbPool) -> Result<User, AppE
 }
 
 pub fn is_htmx(headers: &HeaderMap) -> bool {
-    headers.get("HX-Request")
+    headers.get("hx-request")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
+/// True when the request was fired by hx-boost (full-page navigation, not a partial swap).
+/// Boosted requests carry HX-Boosted: true alongside HX-Request: true.
+pub fn is_htmx_boost(headers: &HeaderMap) -> bool {
+    headers.get("hx-boosted")
         .and_then(|v| v.to_str().ok())
         .map(|v| v == "true")
         .unwrap_or(false)

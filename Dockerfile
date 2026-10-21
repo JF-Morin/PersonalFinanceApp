@@ -1,7 +1,7 @@
 ## Stage 1 — Build
-FROM rust:1.82-slim-bookworm AS builder
+FROM rust:slim-bookworm AS builder
 
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y pkg-config && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ RUN touch src/main.rs && cargo build --release
 ## Stage 2 — Runtime
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

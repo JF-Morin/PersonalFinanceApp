@@ -7,6 +7,46 @@
   <a href="/upload" class="btn-primary"><i class="fas fa-file-upload mr-1"></i> Importer</a>
 </div>
 
+<!-- Toast notification -->
+<div id="delete-toast"
+     style="display:none; position:fixed; bottom:1.5rem; right:1.5rem; z-index:1000"
+     class="bg-green-600 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2">
+  <i class="fas fa-check-circle"></i>
+  <span id="delete-toast-msg"></span>
+</div>
+
+<!-- Delete confirmation modal -->
+<div id="delete-modal"
+     style="display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.5)"
+     class="flex items-center justify-center p-4">
+  <div class="card max-w-lg w-full">
+    <h2 class="text-lg font-semibold mb-2">Supprimer le fichier</h2>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">
+      <i class="fas fa-file-pdf text-red-400 mr-1"></i>
+      <span id="modal-filename" class="font-medium text-gray-900 dark:text-white"></span>
+    </p>
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 mt-3">
+      Voulez-vous également supprimer les
+      <strong id="modal-row-count"></strong> transactions associées à ce fichier ?
+    </p>
+    <div class="flex flex-col gap-2">
+      <button id="btn-delete-with-tx"
+              class="btn-primary w-full justify-center"
+              style="background:#dc2626; border-color:#dc2626">
+        <i class="fas fa-trash mr-2"></i> Oui — supprimer le fichier <em>et</em> les transactions
+      </button>
+      <button id="btn-delete-file-only"
+              class="btn-secondary w-full justify-center">
+        <i class="fas fa-file-slash mr-2"></i> Non — supprimer le fichier uniquement
+      </button>
+      <button id="btn-cancel-delete"
+              class="btn-secondary w-full justify-center mt-1">
+        Annuler
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="card overflow-hidden p-0">
   <div class="overflow-x-auto">
     <table class="w-full">
@@ -17,12 +57,13 @@
           <th class="table-header">Importé le</th>
           <th class="table-header">Lignes</th>
           <th class="table-header">Importé par</th>
+          <th class="table-header"></th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+      <tbody id="files-tbody" class="divide-y divide-gray-100 dark:divide-slate-700">
         {% if files %}
         {% for f in files %}
-        <tr class="hover:bg-gray-50 dark:hover:bg-slate-700">
+        <tr id="file-row-{{ f.id }}" class="hover:bg-gray-50 dark:hover:bg-slate-700">
           <td class="table-cell">
             <i class="fas fa-file-pdf text-red-400 mr-2"></i>{{ f.filename }}
           </td>
@@ -30,11 +71,23 @@
           <td class="table-cell text-gray-500 whitespace-nowrap">{{ f.imported_at }}</td>
           <td class="table-cell text-center">{{ f.row_count }}</td>
           <td class="table-cell text-gray-500">{{ f.importer_name }}</td>
+          <td class="table-cell text-right">
+            <button
+              class="w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400 dark:text-red-400 delete-btn"
+              data-id="{{ f.id }}"
+              data-filename="{{ f.filename }}"
+              data-row-count="{{ f.row_count }}"
+              title="Supprimer ce fichier"
+              onmouseenter="this.style.color='#dc2626';this.style.background='rgba(239,68,68,0.12)'"
+              onmouseleave="this.style.color='';this.style.background=''">
+              <i class="fas fa-trash-can text-xs"></i>
+            </button>
+          </td>
         </tr>
         {% endfor %}
         {% else %}
-        <tr>
-          <td colspan="5" class="text-center py-12 text-gray-400">
+        <tr id="empty-row">
+          <td colspan="6" class="text-center py-12 text-gray-400">
             <i class="fas fa-inbox text-4xl mb-3 block"></i>
             Aucun fichier importé.
           </td>
@@ -44,4 +97,79 @@
     </table>
   </div>
 </div>
+
+<script>
+(function () {
+  var modal       = document.getElementById('delete-modal');
+  var modalName   = document.getElementById('modal-filename');
+  var modalCount  = document.getElementById('modal-row-count');
+  var btnWithTx   = document.getElementById('btn-delete-with-tx');
+  var btnFileOnly = document.getElementById('btn-delete-file-only');
+  var btnCancel   = document.getElementById('btn-cancel-delete');
+  var toast       = document.getElementById('delete-toast');
+  var toastMsg    = document.getElementById('delete-toast-msg');
+
+  var currentId = null;
+
+  // Open modal when a delete button is clicked
+  document.querySelectorAll('.delete-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      currentId = btn.dataset.id;
+      modalName.textContent  = btn.dataset.filename;
+      modalCount.textContent = btn.dataset.rowCount;
+      modal.style.display = 'flex';
+    });
+  });
+
+  btnCancel.addEventListener('click', function () { modal.style.display = 'none'; });
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) modal.style.display = 'none';
+  });
+
+  btnWithTx.addEventListener('click',   function () { doDelete(true);  });
+  btnFileOnly.addEventListener('click', function () { doDelete(false); });
+
+  async function doDelete(withTransactions) {
+    if (!currentId) return;
+    var url = '/imported-files/' + currentId + '/delete?with_transactions=' + (withTransactions ? '1' : '0');
+    modal.style.display = 'none';
+
+    try {
+      var r    = await fetch(url, { method: 'POST' });
+      var data = await r.json();
+
+      if (data.ok) {
+        // Remove the row from the table
+        var row = document.getElementById('file-row-' + currentId);
+        if (row) row.remove();
+
+        // If table is now empty, show the empty state row
+        var tbody = document.getElementById('files-tbody');
+        if (tbody && tbody.querySelectorAll('tr').length === 0) {
+          var emptyRow = document.createElement('tr');
+          emptyRow.innerHTML =
+            '<td colspan="6" class="text-center py-12 text-gray-400">' +
+              '<i class="fas fa-inbox text-4xl mb-3 block"></i>' +
+              'Aucun fichier importé.' +
+            '</td>';
+          tbody.appendChild(emptyRow);
+        }
+
+        // Toast
+        if (withTransactions && data.transactions_deleted > 0) {
+          toastMsg.textContent = 'Fichier supprimé — ' + data.transactions_deleted + ' transaction(s) supprimée(s).';
+        } else {
+          toastMsg.textContent = 'Fichier supprimé.';
+        }
+        toast.style.display = 'flex';
+        setTimeout(function () { toast.style.display = 'none'; }, 4000);
+      } else {
+        alert('Erreur : ' + (data.error || 'Suppression échouée'));
+      }
+    } catch (e) {
+      alert('Erreur réseau : ' + e.message);
+    }
+  }
+})();
+</script>
 {% endblock %}

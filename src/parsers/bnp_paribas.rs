@@ -122,7 +122,7 @@ fn extract_years(text: &str) -> (i32, u32, i32, u32) {
 
 /// For cross-year statements (e.g. Dec 2025 – Jan 2026):
 /// months ≤ end_month belong to end_year; others belong to start_year.
-fn infer_year(month: u32, start_month: u32, end_month: u32, start_year: i32, end_year: i32) -> i32 {
+fn infer_year(month: u32, _start_month: u32, end_month: u32, start_year: i32, end_year: i32) -> i32 {
     if start_year == end_year {
         return start_year;
     }

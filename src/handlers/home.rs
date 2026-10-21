@@ -1,7 +1,7 @@
 use axum::{extract::State, response::Html};
 use axum_extra::extract::CookieJar;
 
-use crate::{error::AppResult, models::Balance, AppState};
+use crate::{db::get_setting, error::AppResult, models::{Balance, Currency}, AppState};
 use super::base_context;
 
 pub async fn get_home(
@@ -12,7 +12,7 @@ pub async fn get_home(
 
     // Balances: for each complete transaction with other_share set,
     // compute what each user owes each other (per currency).
-    let rows = sqlx::query!(
+    let rows: Vec<(i64, f64, Option<f64>, i64, String, String)> = sqlx::query_as(
         r#"
         SELECT t.paid_by, t.amount, t.other_share, t.currency_id,
                u.name || COALESCE(' ' || u.last_name, '') AS payer_name,
@@ -35,15 +35,15 @@ pub async fn get_home(
     use std::collections::HashMap;
     let mut debts: HashMap<(i64, i64, i64), f64> = HashMap::new(); // (from_id, to_id, currency_id) -> amount
 
-    for row in &rows {
-        let share = row.other_share.unwrap_or(0.0) / 100.0;
-        let owed = row.amount.abs() * share;
+    for (paid_by, amount, other_share, currency_id, _, _) in &rows {
+        let share = other_share.unwrap_or(0.0) / 100.0;
+        let owed = amount.abs() * share;
 
         // Assumes two users: "the other" is anyone who didn't pay.
         // With more users this would split the share equally, which may not be desired.
         for other in &all_users {
-            if other.id != row.paid_by {
-                let key = (other.id, row.paid_by, row.currency_id);
+            if other.id != *paid_by {
+                let key = (other.id, *paid_by, *currency_id);
                 *debts.entry(key).or_insert(0.0) += owed;
             }
         }
@@ -52,7 +52,7 @@ pub async fn get_home(
     let mut balances: Vec<Balance> = Vec::new();
     let currency_symbols: HashMap<i64, String> = rows
         .iter()
-        .map(|r| (r.currency_id, r.currency_symbol.clone()))
+        .map(|(_, _, _, cid, _, sym)| (*cid, sym.clone()))
         .collect();
 
     let user_names: HashMap<i64, String> = all_users
@@ -71,14 +71,25 @@ pub async fn get_home(
         }
     }
 
-    let pending_count = sqlx::query_scalar!(
+    let pending_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM transactions t JOIN transaction_status s ON t.status_id = s.id WHERE s.name = 'pending'"
     )
     .fetch_one(&state.db)
     .await?;
 
+    let currencies = sqlx::query_as::<_, Currency>("SELECT * FROM currencies ORDER BY name")
+        .fetch_all(&state.db)
+        .await?;
+    let default_currency_id: i64 = get_setting(&state.db, "default_currency_id")
+        .await
+        .unwrap_or_else(|_| "1".to_string())
+        .parse()
+        .unwrap_or(1);
+
     ctx.insert("balances", &balances);
     ctx.insert("pending_count", &pending_count);
+    ctx.insert("currencies", &currencies);
+    ctx.insert("default_currency_id", &default_currency_id);
 
     let html = state.tera.render("home.html", &ctx)?;
     Ok(Html(html))

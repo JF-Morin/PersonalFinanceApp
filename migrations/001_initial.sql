@@ -33,13 +33,15 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE TABLE IF NOT EXISTS imported_files (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename    TEXT     NOT NULL,
-    bank_id     INTEGER  NOT NULL REFERENCES banks(id),
-    source_file TEXT     NOT NULL,
-    imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    row_count   INTEGER  NOT NULL DEFAULT 0,
-    importer_id INTEGER  NOT NULL REFERENCES users(id)
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename     TEXT     NOT NULL,
+    bank_id      INTEGER  NOT NULL REFERENCES banks(id),
+    source_file  TEXT     NOT NULL,
+    imported_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    row_count    INTEGER  NOT NULL DEFAULT 0,
+    importer_id  INTEGER  NOT NULL REFERENCES users(id),
+    -- SHA-256 hex digest of the PDF bytes; NULL for manually-entered transactions.
+    content_hash TEXT     UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS transactions (

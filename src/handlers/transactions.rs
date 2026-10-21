@@ -1,18 +1,18 @@
 use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
-    response::{Html, IntoResponse, Redirect},
+    response::{Html, IntoResponse, Json, Redirect},
     Form,
 };
 use axum_extra::extract::CookieJar;
 use serde::Deserialize;
 
 use crate::{
-    error::AppResult,
+    error::{AppError, AppResult},
     models::{Category, Currency, TransactionView, User},
     AppState,
 };
-use super::{base_context, is_htmx, htmx_redirect};
+use super::{base_context, get_user_id, is_htmx, htmx_redirect};
 
 #[derive(Deserialize, Default)]
 pub struct TransactionFilter {
@@ -28,10 +28,13 @@ pub async fn get_transactions(
 ) -> AppResult<Html<String>> {
     let transactions = fetch_transaction_views(&state.db, false, &filter).await?;
 
-    // HTMX filter request — return only the table rows partial
-    if is_htmx(&headers) {
+    // Targeted HTMX request (filter form) — return only the rows partial.
+    // hx-boost navigation also sets HX-Request, so exclude it here.
+    if is_htmx(&headers) && !super::is_htmx_boost(&headers) {
+        let current_user_id = super::get_user_id(&jar)?;
         let mut ctx = tera::Context::new();
         ctx.insert("transactions", &transactions);
+        ctx.insert("current_user_id", &current_user_id);
         let html = state.tera.render("transactions/_tx_rows.html", &ctx)?;
         return Ok(Html(html));
     }
@@ -40,9 +43,15 @@ pub async fn get_transactions(
     let categories = sqlx::query_as::<_, Category>("SELECT * FROM categories ORDER BY name")
         .fetch_all(&state.db)
         .await?;
+    let currencies = sqlx::query_as::<_, Currency>("SELECT * FROM currencies ORDER BY name")
+        .fetch_all(&state.db)
+        .await?;
+    let current_user_id = super::get_user_id(&jar)?;
 
     ctx.insert("transactions", &transactions);
     ctx.insert("categories", &categories);
+    ctx.insert("currencies", &currencies);
+    ctx.insert("current_user_id", &current_user_id);
     ctx.insert("filter", &filter.search);
     ctx.insert("filter_category", &filter.category_id);
 
@@ -83,8 +92,10 @@ pub async fn get_incomplete(
 
 #[derive(Deserialize)]
 pub struct UpdateTransactionForm {
+    pub date: Option<String>,
     pub operation: Option<String>,
     pub amount: Option<f64>,
+    pub currency_id: Option<i64>,
     pub category_id: Option<i64>,
     pub other_share: Option<f64>,
     pub notes: Option<String>,
@@ -98,7 +109,7 @@ pub async fn post_update_transaction(
     Path(id): Path<i64>,
     Form(form): Form<UpdateTransactionForm>,
 ) -> AppResult<impl IntoResponse> {
-    let _ = super::get_user_id(&jar)?;
+    let user_id = super::get_user_id(&jar)?;
 
     let marking_complete = form.mark_complete.as_deref() == Some("1")
         && form.category_id.is_some()
@@ -106,42 +117,78 @@ pub async fn post_update_transaction(
 
     let status_id: i64 = if marking_complete { 2 } else { 1 };
 
-    // operation/amount are only submitted from the broken-transaction fix form.
-    if form.operation.is_some() || form.amount.is_some() {
-        // COALESCE keeps the stored value if the field was somehow omitted; parse_note is cleared.
-        sqlx::query(
-            "UPDATE transactions SET operation = COALESCE(?, operation), amount = COALESCE(?, amount), category_id = ?, other_share = ?, notes = ?, status_id = ?, parse_note = NULL WHERE id = ?",
-        )
-        .bind(form.operation.as_deref())
-        .bind(form.amount)
-        .bind(form.category_id)
-        .bind(form.other_share)
-        .bind(&form.notes)
-        .bind(status_id)
-        .bind(id)
-        .execute(&state.db)
-        .await?;
-    } else {
-        sqlx::query(
-            "UPDATE transactions SET category_id = ?, other_share = ?, notes = ?, status_id = ? WHERE id = ?",
-        )
-        .bind(form.category_id)
-        .bind(form.other_share)
-        .bind(&form.notes)
-        .bind(status_id)
-        .bind(id)
-        .execute(&state.db)
-        .await?;
-    }
+    sqlx::query(
+        "UPDATE transactions \
+         SET date           = COALESCE(?, date), \
+             transaction_date = COALESCE(?, transaction_date), \
+             operation      = COALESCE(?, operation), \
+             amount         = COALESCE(?, amount), \
+             currency_id    = COALESCE(?, currency_id), \
+             category_id    = ?, \
+             other_share    = ?, \
+             notes          = ?, \
+             status_id      = ?, \
+             parse_note     = NULL \
+         WHERE id = ? AND paid_by = ?",
+    )
+    .bind(form.date.as_deref())
+    .bind(form.date.as_deref())
+    .bind(form.operation.as_deref())
+    .bind(form.amount)
+    .bind(form.currency_id)
+    .bind(form.category_id)
+    .bind(form.other_share)
+    .bind(&form.notes)
+    .bind(status_id)
+    .bind(id)
+    .bind(user_id)
+    .execute(&state.db)
+    .await?;
+
+    tracing::info!(id = %id, user_id = %user_id, "Transaction updated");
 
     if is_htmx(&headers) {
         if marking_complete {
-            // Empty response with outerHTML swap removes the card from the DOM
             return Ok("".into_response());
         }
         return Ok(htmx_redirect("/incomplete-transactions").into_response());
     }
-    Ok(Redirect::to("/incomplete-transactions").into_response())
+    // Called via fetch() from the list page — return JSON so JS can handle it
+    Ok(Json(serde_json::json!({ "ok": true })).into_response())
+}
+
+pub async fn post_delete_transaction(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    match delete_transaction_inner(&state, &jar, id).await {
+        Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
+    }
+}
+
+async fn delete_transaction_inner(state: &AppState, jar: &CookieJar, id: i64) -> AppResult<()> {
+    let user_id = get_user_id(jar)?;
+
+    let exists: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM transactions WHERE id = ? AND paid_by = ?",
+    )
+    .bind(id)
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    exists.ok_or_else(|| AppError::Other("Transaction introuvable ou non autorisée".into()))?;
+
+    sqlx::query("DELETE FROM transactions WHERE id = ? AND paid_by = ?")
+        .bind(id)
+        .bind(user_id)
+        .execute(&state.db)
+        .await?;
+
+    tracing::info!(id = %id, user_id = %user_id, "Transaction deleted");
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -165,7 +212,7 @@ pub async fn post_manual_transaction(
 
     // Manual transactions have no imported_file; we use a sentinel value.
     // We need a valid from_file_id. For manual entries, we create a pseudo import record.
-    let file_id = sqlx::query_scalar!(
+    let file_id: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM imported_files WHERE filename = 'manual' LIMIT 1"
     )
     .fetch_optional(&state.db)
@@ -174,10 +221,10 @@ pub async fn post_manual_transaction(
     let file_id = if let Some(id) = file_id {
         id
     } else {
-        sqlx::query_scalar!(
+        sqlx::query_scalar(
             "INSERT INTO imported_files (filename, bank_id, source_file, row_count, importer_id) VALUES ('manual', 1, '', 0, ?) RETURNING id",
-            user_id
         )
+        .bind(user_id)
         .fetch_one(&state.db)
         .await?
     };
@@ -226,8 +273,11 @@ async fn fetch_transaction_views(
         r#"
         SELECT t.id, t.date, t.transaction_date, t.operation, t.amount,
                cur.symbol AS currency_symbol,
+               t.currency_id,
                cat.name   AS category_name,
+               t.category_id,
                u.name || COALESCE(' ' || u.last_name, '') AS paid_by_name,
+               t.paid_by,
                t.other_share, s.name AS status_name, t.notes, t.from_file_id,
                t.parse_note
         FROM transactions t
@@ -240,19 +290,22 @@ async fn fetch_transaction_views(
         "#
     );
 
+    #[allow(clippy::type_complexity)]
     let rows = sqlx::query_as::<
         _,
-        (i64, String, String, String, f64, String, Option<String>, String, Option<f64>, String, Option<String>, i64, Option<String>),
+        (i64, String, String, String, f64, String, i64, Option<String>, Option<i64>, String, i64, Option<f64>, String, Option<String>, i64, Option<String>),
     >(&sql)
     .fetch_all(db)
     .await?;
 
     let mut views: Vec<TransactionView> = rows
         .into_iter()
-        .map(|(id, date, td, op, amt, csym, cat, pby, share, sname, notes, fid, parse_note)| {
+        .map(|(id, date, td, op, amt, csym, cid, cat, cat_id, pby, pby_id, share, sname, notes, fid, parse_note)| {
             TransactionView {
                 id, date, transaction_date: td, operation: op, amount: amt,
-                currency_symbol: csym, category_name: cat, paid_by_name: pby,
+                currency_symbol: csym, currency_id: cid,
+                category_name: cat, category_id: cat_id,
+                paid_by_name: pby, paid_by_id: pby_id,
                 other_share: share, status_name: sname, notes, from_file_id: fid,
                 parse_note,
             }

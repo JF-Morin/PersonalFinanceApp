@@ -10,44 +10,308 @@
   </p>
 </div>
 
-<!-- #upload-result is the HTMX swap target: the server replaces its innerHTML
-     with _preview.html after parsing, without a full page reload. -->
-<div id="upload-result">
-  <div class="card max-w-xl" x-data="{ dragging: false, filename: 'Aucun fichier sélectionné' }">
+<!-- Drop zone -->
+<div class="card max-w-xl mb-4">
+  <div id="drop-target"
+       class="border-2 border-dashed border-gray-300 dark:border-slate-600
+              rounded-xl p-10 text-center cursor-pointer transition-colors select-none">
+    <i class="fas fa-file-pdf text-5xl text-gray-300 dark:text-slate-500 mb-4 block"></i>
+    <p class="text-gray-500 dark:text-gray-400 text-sm">
+      Glissez des fichiers PDF ici ou
+      <span class="text-primary-600 font-medium">cliquez pour choisir</span>
+    </p>
+    <p class="text-xs text-gray-400 mt-2">Plusieurs fichiers acceptés</p>
+  </div>
+  <input type="file" id="file-input" accept=".pdf" multiple class="hidden">
+</div>
 
-    <form hx-post="/upload"
-          hx-target="#upload-result"
-          hx-swap="innerHTML"
-          hx-encoding="multipart/form-data"
-          hx-indicator="#htmx-loader">
-
-      <div
-        class="border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer"
-        :class="dragging ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-300 dark:border-slate-600'"
-        @dragover.prevent="dragging = true"
-        @dragleave.prevent="dragging = false"
-        @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files; filename = $event.dataTransfer.files[0]?.name ?? 'Aucun fichier'"
-        @click="$refs.fileInput.click()"
-      >
-        <i class="fas fa-file-pdf text-5xl text-gray-300 dark:text-slate-500 mb-4"></i>
-        <p class="text-gray-500 dark:text-gray-400 text-sm">
-          Glissez un fichier PDF ici ou <span class="text-indigo-600 font-medium">cliquez pour choisir</span>
-        </p>
-        <p class="text-xs text-gray-400 mt-1" x-text="filename"></p>
-      </div>
-
-      <input type="file" name="file" accept=".pdf" required x-ref="fileInput" class="hidden"
-             @change="filename = $event.target.files[0]?.name ?? 'Aucun fichier'">
-
-      <div class="mt-4">
-        <button type="submit" class="btn-primary w-full">
-          <span class="htmx-indicator mr-1"><i class="fas fa-spinner fa-spin"></i></span>
-          <i class="fas fa-cog mr-1 htmx-indicator" style="display:none"></i>
-          <i class="fas fa-magnifying-glass mr-1"></i> Analyser le fichier
-        </button>
-      </div>
-    </form>
-
+<!-- Import summary (shown after at least one file imported) -->
+<div class="card max-w-xl mb-4" id="import-summary" style="display:none">
+  <h2 class="text-base font-semibold mb-3 flex items-center gap-2">
+    <i class="fas fa-check-circle text-green-500"></i> Résumé de l'import
+  </h2>
+  <div id="import-summary-list" class="space-y-2"></div>
+  <div class="mt-3 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <a href="/incomplete-transactions" class="btn-primary text-sm">
+      <i class="fas fa-list mr-1"></i> Voir les transactions à compléter
+    </a>
   </div>
 </div>
+
+<!-- File queue (hidden until files are added) -->
+<div class="card max-w-xl" id="file-queue" style="display:none">
+
+  <!-- Bulk actions -->
+  <div class="flex items-center gap-3 mb-5 pb-4 border-b border-gray-200 dark:border-slate-700">
+    <span class="text-sm font-semibold text-gray-700 dark:text-gray-200" id="file-count">0 fichier(s)</span>
+    <button id="btn-analyze-all"
+            class="btn-primary"
+            style="padding:0.45rem 0.9rem; font-size:0.875rem">
+      <i class="fas fa-play mr-1"></i> Analyser tout
+    </button>
+    <button id="btn-delete-all"
+            class="btn-secondary"
+            style="padding:0.45rem 0.9rem; font-size:0.875rem">
+      <i class="fas fa-trash mr-1 text-red-500"></i> Supprimer tout
+    </button>
+  </div>
+
+  <div id="file-list" class="space-y-3"></div>
+</div>
+
+<script>
+(function () {
+  var queue = [];
+  var nextId = 0;
+
+  var dropTarget   = document.getElementById('drop-target');
+  var fileInput    = document.getElementById('file-input');
+  var queueCard    = document.getElementById('file-queue');
+  var fileList     = document.getElementById('file-list');
+  var fileCount    = document.getElementById('file-count');
+  var btnAnalyzeAll = document.getElementById('btn-analyze-all');
+  var btnDeleteAll  = document.getElementById('btn-delete-all');
+
+  /* ── Drop zone ─────────────────────────────────────────── */
+  dropTarget.addEventListener('click', function () { fileInput.click(); });
+
+  dropTarget.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    dropTarget.style.borderColor = '#4f46e5';
+    dropTarget.style.backgroundColor = 'rgba(79,70,229,0.05)';
+  });
+  dropTarget.addEventListener('dragleave', function () {
+    dropTarget.style.borderColor = '';
+    dropTarget.style.backgroundColor = '';
+  });
+  dropTarget.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dropTarget.style.borderColor = '';
+    dropTarget.style.backgroundColor = '';
+    addFiles(e.dataTransfer.files);
+  });
+
+  fileInput.addEventListener('change', function () {
+    addFiles(fileInput.files);
+    fileInput.value = '';
+  });
+
+  btnAnalyzeAll.addEventListener('click', analyzeAll);
+  btnDeleteAll.addEventListener('click', deleteAll);
+
+  /* ── Queue management ─────────────────────────────────── */
+  function addFiles(files) {
+    var arr = Array.from(files);
+    for (var i = 0; i < arr.length; i++) {
+      var f = arr[i];
+      if (!f.name.toLowerCase().endsWith('.pdf')) continue;
+      var item = { id: nextId++, file: f, status: 'pending', el: null };
+      item.el = buildRow(item);
+      queue.push(item);
+      fileList.appendChild(item.el);
+    }
+    refresh();
+  }
+
+  function removeItem(id) {
+    var idx = queue.findIndex(function (i) { return i.id === id; });
+    if (idx === -1) return;
+    queue[idx].el.remove();
+    queue.splice(idx, 1);
+    refresh();
+  }
+
+  function deleteAll() {
+    queue.filter(function (i) { return i.status !== 'imported'; })
+         .forEach(function (i) { i.el.remove(); });
+    queue = queue.filter(function (i) { return i.status === 'imported'; });
+    refresh();
+  }
+
+  function refresh() {
+    queueCard.style.display = queue.length ? '' : 'none';
+    fileCount.textContent = queue.length + ' fichier(s)';
+    var hasPending = queue.some(function (i) {
+      return i.status === 'pending' || i.status === 'error';
+    });
+    btnAnalyzeAll.disabled = !hasPending;
+    btnAnalyzeAll.style.opacity = hasPending ? '1' : '0.4';
+    btnAnalyzeAll.style.cursor  = hasPending ? 'pointer' : 'not-allowed';
+  }
+
+  /* ── Row builder ──────────────────────────────────────── */
+  function buildRow(item) {
+    var kb = Math.round(item.file.size / 1024);
+
+    var row = document.createElement('div');
+    row.className = 'rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700';
+
+    row.innerHTML =
+      '<div class="flex items-center gap-3 p-3">' +
+        '<div class="item-status-icon w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"' +
+             ' style="background:#f3f4f6">' +
+          '<i class="fas fa-file-pdf text-sm" style="color:#9ca3af"></i>' +
+        '</div>' +
+        '<div class="flex-1 min-w-0">' +
+          '<p class="text-sm font-medium truncate text-gray-900 dark:text-white">' + esc(item.file.name) + '</p>' +
+          '<p class="item-status-text text-xs mt-0.5 text-gray-500 dark:text-gray-300">' + kb + ' Ko — En attente</p>' +
+        '</div>' +
+        '<div class="flex items-center gap-1">' +
+          '<button class="btn-analyze w-8 h-8 flex items-center justify-center rounded-full' +
+                  ' border-none cursor-pointer bg-transparent text-gray-400 dark:text-slate-400" title="Analyser et importer">' +
+            '<i class="fas fa-magnifying-glass text-xs"></i>' +
+          '</button>' +
+          '<button class="btn-del w-8 h-8 flex items-center justify-center rounded-full' +
+                  ' border-none cursor-pointer bg-transparent text-red-400" title="Supprimer">' +
+            '<i class="fas fa-trash-can text-xs"></i>' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="item-detail border-t border-gray-200 dark:border-slate-700 px-4 py-3" style="display:none"></div>';
+
+    row.querySelector('.btn-analyze').addEventListener('click', function () { analyzeOne(item); });
+    row.querySelector('.btn-del').addEventListener('click', function () { removeItem(item.id); });
+
+    // hover effects
+    var btnA = row.querySelector('.btn-analyze');
+    btnA.addEventListener('mouseenter', function () { btnA.style.color = '#2563eb'; btnA.style.background = 'rgba(37,99,235,0.08)'; });
+    btnA.addEventListener('mouseleave', function () { btnA.style.color = ''; btnA.style.background = ''; });
+
+    var btnD = row.querySelector('.btn-del');
+    btnD.addEventListener('mouseenter', function () { btnD.style.color = '#dc2626'; btnD.style.background = 'rgba(239,68,68,0.12)'; });
+    btnD.addEventListener('mouseleave', function () { btnD.style.color = ''; btnD.style.background = ''; });
+
+    return row;
+  }
+
+  /* ── Status display ───────────────────────────────────── */
+  var STATUS = {
+    pending:   { bg: '#f3f4f6', ic: '#9ca3af', cls: 'fas fa-file-pdf',        text: function (i) { return Math.round(i.file.size / 1024) + ' Ko — En attente'; } },
+    analyzing: { bg: '#dbeafe', ic: '#3b82f6', cls: 'fas fa-spinner fa-spin', text: function ()  { return 'Analyse en cours…'; } },
+    importing: { bg: '#e0e7ff', ic: '#6366f1', cls: 'fas fa-spinner fa-spin', text: function ()  { return 'Importation en cours…'; } },
+    imported:  { bg: '#d1fae5', ic: '#059669', cls: 'fas fa-check-double',    text: function (i) { return i._info || 'Importé'; } },
+    error:     { bg: '#fee2e2', ic: '#ef4444', cls: 'fas fa-xmark',           text: function ()  { return 'Erreur'; } },
+  };
+
+  function setStatus(item, status, detailHtml) {
+    item.status = status;
+    var cfg = STATUS[status];
+
+    var iconWrap = item.el.querySelector('.item-status-icon');
+    iconWrap.style.background = cfg.bg;
+    iconWrap.innerHTML = '<i class="' + cfg.cls + ' text-sm" style="color:' + cfg.ic + '"></i>';
+
+    item.el.querySelector('.item-status-text').textContent = cfg.text(item);
+
+    var btnA = item.el.querySelector('.btn-analyze');
+    var btnD = item.el.querySelector('.btn-del');
+    btnA.style.display = (status === 'pending' || status === 'error') ? '' : 'none';
+    btnD.style.display = (status === 'importing' || status === 'imported') ? 'none' : '';
+
+    var detail = item.el.querySelector('.item-detail');
+    if (detailHtml) {
+      detail.innerHTML = detailHtml;
+      detail.style.display = '';
+    } else {
+      detail.style.display = 'none';
+      detail.innerHTML = '';
+    }
+
+    refresh();
+  }
+
+  /* ── Analyze + Import (one click) ─────────────────────── */
+  async function analyzeOne(item) {
+    if (item.status !== 'pending' && item.status !== 'error') return;
+    setStatus(item, 'analyzing');
+
+    var fd = new FormData();
+    fd.append('file', item.file);
+
+    var data;
+    try {
+      var r = await fetch('/upload/analyze', { method: 'POST', body: fd });
+      data = await r.json();
+    } catch (e) {
+      setStatus(item, 'error', errHtml(e.message));
+      return;
+    }
+
+    if (!data.ok) {
+      setStatus(item, 'error', errHtml(data.error || 'Fichier non reconnu par aucun parseur'));
+      return;
+    }
+
+    if (data.already_imported_at) {
+      setStatus(item, 'error', errHtml('Ce fichier a déjà été importé le ' + data.already_imported_at));
+      return;
+    }
+
+    setStatus(item, 'importing');
+
+    var params = new URLSearchParams({
+      transactions_json: data.transactions_json,
+      bank_id:           data.bank_id,
+      filename:          data.filename,
+      source_file:       data.source_file,
+      content_hash:      data.content_hash,
+    });
+
+    try {
+      var importRes = await fetch('/upload/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+      if (importRes.ok) {
+        removeItem(item.id);
+        addSummaryEntry(data, item.file.name);
+      } else {
+        setStatus(item, 'error', errHtml("Erreur lors de l'importation (statut " + importRes.status + ')'));
+      }
+    } catch (e) {
+      setStatus(item, 'error', errHtml(e.message));
+    }
+  }
+
+  function analyzeAll() {
+    var pending = queue.filter(function (i) { return i.status === 'pending' || i.status === 'error'; });
+    return Promise.all(pending.map(function (i) { return analyzeOne(i); }));
+  }
+
+  function errHtml(msg) {
+    return '<p style="font-size:0.75rem; color:#dc2626">' +
+           '<i class="fas fa-circle-xmark" style="margin-right:0.3rem"></i>' + esc(msg) + '</p>';
+  }
+
+  function addSummaryEntry(data, originalName) {
+    var summary = document.getElementById('import-summary');
+    var list    = document.getElementById('import-summary-list');
+    var broken  = data.broken_count > 0
+      ? '<span class="text-amber-600 dark:text-amber-400 ml-1">(' + data.broken_count + ' incomplète(s))</span>' : '';
+    var entry = document.createElement('div');
+    entry.className = 'flex items-start gap-3 p-2 rounded-lg bg-gray-50 dark:bg-slate-700/50';
+    entry.innerHTML =
+      '<i class="fas fa-file-pdf text-red-400 mt-0.5 flex-shrink-0"></i>' +
+      '<div class="min-w-0">' +
+        '<p class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">' + esc(originalName) + '</p>' +
+        '<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">' +
+          esc(data.bank_name) + ' — ' +
+          '<span class="text-green-600 dark:text-green-400 font-semibold">' + data.tx_count + ' transaction(s) importée(s)</span>' +
+          broken +
+        '</p>' +
+      '</div>';
+    list.appendChild(entry);
+    summary.style.display = '';
+  }
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+})();
+</script>
 {% endblock %}

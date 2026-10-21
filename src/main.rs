@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use std::sync::Arc;
@@ -77,7 +77,13 @@ async fn main() -> anyhow::Result<()> {
     db::run_migrations(&db).await?;
 
     // ── Templates ─────────────────────────────────────────────────────────────
-    let tera = Tera::new("templates/**/*.html")?;
+    let mut tera = Tera::new("templates/**/*.html")?;
+    tera.register_filter("fixed2", |value: &tera::Value, _: &std::collections::HashMap<String, tera::Value>| {
+        match value.as_f64() {
+            Some(f) => Ok(tera::Value::String(format!("{:.2}", f))),
+            None => Err(tera::Error::msg("fixed2: expected a number")),
+        }
+    });
     tracing::info!("Templates loaded");
 
     let state = AppState {
@@ -97,15 +103,21 @@ async fn main() -> anyhow::Result<()> {
         .route("/settings",                get(handlers::settings::get_settings)
                                           .post(handlers::settings::post_settings))
         .route("/settings/users",          post(handlers::settings::post_new_user))
+        .route("/settings/users/:id",      delete(handlers::settings::delete_user))
+        .route("/settings/users/:id/edit", post(handlers::settings::post_edit_user))
+        .route("/settings/password",       post(handlers::settings::post_change_password))
         // Transactions
         .route("/transactions",            get(handlers::transactions::get_transactions))
         .route("/incomplete-transactions", get(handlers::transactions::get_incomplete))
         .route("/transactions/:id/update", post(handlers::transactions::post_update_transaction))
+        .route("/transactions/:id/delete", post(handlers::transactions::post_delete_transaction))
         .route("/transactions/manual",     post(handlers::transactions::post_manual_transaction))
         // Imports
         .route("/imported-files",          get(handlers::imports::get_imported_files))
+        .route("/imported-files/:id/delete", post(handlers::imports::post_delete_imported_file))
         .route("/upload",                  get(handlers::imports::get_upload)
                                           .post(handlers::imports::post_upload))
+        .route("/upload/analyze",          post(handlers::imports::post_analyze))
         .route("/upload/confirm",          post(handlers::imports::post_confirm_import))
         // Static files
         .nest_service("/static", ServeDir::new("static"))
