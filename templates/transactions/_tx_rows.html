@@ -1,6 +1,10 @@
 {% if transactions %}
 {% for t in transactions %}
-<tr id="tx-row-{{ t.id }}" class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
+<tr id="tx-row-{{ t.id }}"
+    data-date="{{ t.date }}"
+    data-op="{{ t.operation }}"
+    data-cat="{{ t.category_id | default(value='') }}"
+    class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
   <td class="table-cell text-gray-500 whitespace-nowrap">{{ t.date }}</td>
   <td class="table-cell max-w-xs truncate" title="{{ t.operation }}">{{ t.operation }}</td>
   <td class="table-cell text-gray-500">{{ t.category_name | default(value="—") }}</td>

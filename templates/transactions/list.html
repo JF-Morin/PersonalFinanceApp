@@ -2,18 +2,133 @@
 {% block title %}Transactions — Finance Perso{% endblock %}
 
 {% block content %}
-<div class="mb-6 flex items-center justify-between">
+<div class="mb-5 flex flex-wrap items-center gap-3 justify-between">
   <h1 class="text-2xl font-bold">Transactions</h1>
-  <a href="/upload" class="btn-primary"><i class="fas fa-file-upload mr-1"></i> Importer</a>
+  <div class="flex items-center gap-2 flex-wrap">
+    {% if pending_count > 0 %}
+    <button id="btn-open-carousel"
+            class="btn-primary"
+            style="background:#f59e0b;border-color:#f59e0b">
+      <i class="fas fa-tasks mr-1"></i> Compléter ({{ pending_count }})
+    </button>
+    {% endif %}
+    <button id="btn-add-manual" class="btn-secondary">
+      <i class="fas fa-plus mr-1"></i> Ajouter
+    </button>
+    <button id="btn-export-csv" class="btn-secondary">
+      <i class="fas fa-file-csv mr-1"></i> CSV
+    </button>
+    <a href="/upload" class="btn-primary"><i class="fas fa-file-upload mr-1"></i> Importer</a>
+  </div>
 </div>
 
 <!-- Toast -->
 <div id="tx-toast" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;z-index:1000"
-     class="bg-green-600 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2">
+     class="bg-green-600 text-white font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2">
   <i class="fas fa-check-circle"></i><span id="tx-toast-msg"></span>
 </div>
 
-<!-- Edit modal -->
+<style>
+@keyframes carouselInRight {
+  from { opacity: 0; transform: translateX(36px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+@keyframes carouselInLeft {
+  from { opacity: 0; transform: translateX(-36px); }
+  to   { opacity: 1; transform: translateX(0);     }
+}
+@keyframes carouselFadeIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+.carousel-in-right { animation: carouselInRight 0.22s cubic-bezier(.25,.46,.45,.94) both; }
+.carousel-in-left  { animation: carouselInLeft  0.22s cubic-bezier(.25,.46,.45,.94) both; }
+.carousel-fade-in  { animation: carouselFadeIn  0.2s  cubic-bezier(.25,.46,.45,.94) both; }
+</style>
+
+<!-- ── Carousel modal ─────────────────────────────────────────────────────── -->
+<div id="carousel-overlay"
+     style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px)"
+     class="flex items-center justify-center p-4">
+
+  <div id="carousel-card"
+       class="card w-full max-w-md relative"
+       style="max-height:90vh;overflow-y:auto"
+       onclick="event.stopPropagation()">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-base font-semibold text-gray-800 dark:text-white">
+        <i class="fas fa-tasks text-amber-500 mr-2"></i>
+        À compléter
+        <span id="carousel-counter" class="text-sm font-normal text-gray-500 ml-1"></span>
+      </h2>
+      <button id="carousel-close"
+              class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-700 border-none bg-transparent cursor-pointer">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- Animated body -->
+    <div id="carousel-body">
+
+    <!-- Transaction info -->
+    <div class="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4 mb-4">
+      <p id="c-date" class="text-xs text-gray-400 mb-1"></p>
+      <p id="c-operation" class="font-semibold text-gray-900 dark:text-white leading-tight"></p>
+      <p id="c-amount" class="text-lg font-bold mt-1"></p>
+      <p id="c-parse-note" class="text-xs text-amber-600 dark:text-amber-400 mt-1" style="display:none"></p>
+    </div>
+
+    <!-- Form fields -->
+    <div class="space-y-3">
+      <div id="c-operation-row" style="display:none">
+        <label class="label">Opération *</label>
+        <input id="c-op-input" type="text" class="input" placeholder="Description de l'opération">
+      </div>
+      <div id="c-amount-row" style="display:none">
+        <label class="label">Montant *</label>
+        <input id="c-amt-input" type="number" step="0.01" class="input">
+      </div>
+      <div>
+        <label class="label">Catégorie *</label>
+        <select id="c-category" class="input">
+          <option value="">— Choisir —</option>
+          {% for c in categories %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label">Part de l'autre (%) *</label>
+        <input id="c-share" type="number" min="0" max="100" step="1" class="input" placeholder="50">
+      </div>
+      <div>
+        <label class="label">Notes <span class="text-gray-400 font-normal">(optionnel)</span></label>
+        <input id="c-notes" type="text" class="input" placeholder="Note libre…">
+      </div>
+      <div id="c-save-status" class="text-xs h-4 text-gray-400"></div>
+    </div>
+
+    </div><!-- end #carousel-body -->
+
+    <!-- Navigation -->
+    <div class="flex items-center justify-between mt-5 pt-4 border-t border-gray-200 dark:border-slate-700">
+      <button id="c-prev"
+              class="btn-secondary"
+              style="padding:0.5rem 1rem;font-size:0.875rem">
+        <i class="fas fa-chevron-left mr-1"></i> Précédent
+      </button>
+      <button id="c-next"
+              class="btn-primary"
+              style="padding:0.5rem 1rem;font-size:0.875rem">
+        Suivant <i class="fas fa-chevron-right ml-1"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit modal ─────────────────────────────────────────────────────────── -->
 <div id="edit-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.5)"
      class="flex items-center justify-center p-4">
   <div class="card max-w-lg w-full">
@@ -66,7 +181,7 @@
   </div>
 </div>
 
-<!-- Delete confirmation modal -->
+<!-- ── Delete modal ───────────────────────────────────────────────────────── -->
 <div id="del-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.5)"
      class="flex items-center justify-center p-4">
   <div class="card max-w-sm w-full">
@@ -81,46 +196,105 @@
   </div>
 </div>
 
-<!-- Filters -->
+<!-- ── Manual transaction modal ──────────────────────────────────────────── -->
+<div id="manual-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.5)"
+     class="flex items-center justify-center p-4">
+  <div class="card max-w-lg w-full">
+    <h2 class="text-lg font-semibold mb-4">Ajouter une transaction</h2>
+    <form id="manual-form" class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="label">Date</label>
+        <input type="date" name="date" id="manual-date" required class="input w-full">
+      </div>
+      <div class="col-span-2">
+        <label class="label">Opération</label>
+        <input type="text" name="operation" required placeholder="Description" class="input w-full">
+      </div>
+      <div>
+        <label class="label">Montant (négatif = dépense)</label>
+        <input type="number" name="amount" step="0.01" required class="input w-full">
+      </div>
+      <div>
+        <label class="label">Devise</label>
+        <select name="currency_id" class="input w-full">
+          {% for c in currencies %}
+          <option value="{{ c.id }}" {% if c.id == default_currency_id %}selected{% endif %}>
+            {{ c.name }} ({{ c.symbol }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label">Catégorie</label>
+        <select name="category_id" class="input w-full">
+          <option value="">— Optionnel —</option>
+          {% for c in categories %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label">Part de l'autre (%)</label>
+        <input type="number" name="other_share" min="0" max="100" step="1" class="input w-full" placeholder="50">
+      </div>
+      <div class="col-span-2">
+        <label class="label">Notes</label>
+        <input type="text" name="notes" class="input w-full" placeholder="Optionnel">
+      </div>
+      <div id="manual-error" class="col-span-2 text-red-500 text-sm" style="display:none"></div>
+      <div class="col-span-2 flex gap-2 justify-end mt-1">
+        <button type="button" id="manual-cancel" class="btn-secondary">Annuler</button>
+        <button type="submit" class="btn-primary"><i class="fas fa-save mr-1"></i> Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Filters ────────────────────────────────────────────────────────────── -->
 <div class="card mb-4">
-  <form hx-get="/transactions"
-        hx-target="#tx-tbody"
-        hx-swap="innerHTML"
-        hx-push-url="true"
-        hx-indicator="#htmx-loader"
-        class="flex gap-3 items-end flex-wrap">
+  <div class="flex flex-wrap gap-3 items-end">
+    <!-- Year buttons -->
+    <div>
+      <label class="label">Année</label>
+      <div class="flex gap-1 flex-wrap" id="year-btns">
+        <button class="year-btn btn-secondary active-year" data-year=""
+                style="padding:0.35rem 0.75rem;font-size:0.8125rem">Toutes</button>
+      </div>
+    </div>
+    <!-- Search -->
     <div class="flex-1 min-w-48">
       <label class="label">Recherche</label>
-      <input type="text" name="search" value="{{ filter | default(value='') }}" placeholder="Opération…" class="input">
+      <input type="text" id="search-input" value="{{ filter | default(value='') }}"
+             placeholder="Opération…" class="input" autocomplete="off">
     </div>
+    <!-- Category -->
     <div>
       <label class="label">Catégorie</label>
-      <select name="category_id" class="input">
+      <select id="cat-filter" class="input">
         <option value="">Toutes</option>
         {% for c in categories %}
         <option value="{{ c.id }}" {% if filter_category == c.id %}selected{% endif %}>{{ c.name }}</option>
         {% endfor %}
       </select>
     </div>
-    <button type="submit" class="btn-primary"><i class="fas fa-search mr-1"></i> Filtrer</button>
-    <a href="/transactions" class="btn-secondary">Réinitialiser</a>
-  </form>
+    <button id="btn-reset-filters" class="btn-secondary" style="align-self:flex-end">Réinitialiser</button>
+  </div>
 </div>
 
-<!-- Table -->
+<!-- ── Table ──────────────────────────────────────────────────────────────── -->
 <div class="card overflow-hidden p-0">
   <div class="overflow-x-auto">
     <table class="w-full">
       <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600">
         <tr>
-          <th class="table-header">Date</th>
-          <th class="table-header">Opération</th>
-          <th class="table-header">Catégorie</th>
-          <th class="table-header">Payé par</th>
-          <th class="table-header">Part</th>
-          <th class="table-header">Statut</th>
-          <th class="table-header text-right">Montant</th>
-          <th class="table-header"></th>
+          <th class="table-header" style="min-width:9rem">Date</th>
+          <th class="table-header" style="min-width:18rem">Opération</th>
+          <th class="table-header" style="min-width:11rem">Catégorie</th>
+          <th class="table-header" style="min-width:9rem">Payé par</th>
+          <th class="table-header" style="min-width:6rem">Part</th>
+          <th class="table-header" style="min-width:8rem">Statut</th>
+          <th class="table-header text-right" style="min-width:9rem">Montant</th>
+          <th class="table-header" style="min-width:7rem"></th>
         </tr>
       </thead>
       <tbody id="tx-tbody" class="divide-y divide-gray-100 dark:divide-slate-700">
@@ -132,38 +306,111 @@
 
 <script>
 (function () {
-  var currentUserId = {{ current_user_id }};
-  var delTxId = null;
+  /* ── Data ─────────────────────────────────────────────────────────────── */
+  var ALL_ROWS = Array.from(document.querySelectorAll('#tx-tbody tr[data-date]'));
 
-  // ── Edit modal ──────────────────────────────────────────────────────────────
-  var editModal   = document.getElementById('edit-modal');
-  var editForm    = document.getElementById('edit-form');
-  var editError   = document.getElementById('edit-error');
-  var editCancel  = document.getElementById('edit-cancel');
+  /* ── Filter state ─────────────────────────────────────────────────────── */
+  var activeYear    = '';
+  var activeSearch  = (document.getElementById('search-input').value || '').toLowerCase();
+  var activeCatId   = document.getElementById('cat-filter').value;
+
+  /* ── Year buttons (built from actual data) ────────────────────────────── */
+  (function buildYears() {
+    var years = new Set();
+    ALL_ROWS.forEach(function (r) {
+      var d = r.getAttribute('data-date') || '';
+      if (d) years.add(d.slice(0, 4));
+    });
+    var sorted = Array.from(years).sort().reverse();
+    var container = document.getElementById('year-btns');
+    sorted.forEach(function (y) {
+      var btn = document.createElement('button');
+      btn.className = 'year-btn btn-secondary';
+      btn.style.cssText = 'padding:0.35rem 0.75rem;font-size:0.8125rem';
+      btn.dataset.year = y;
+      btn.textContent = y;
+      container.appendChild(btn);
+    });
+  })();
+
+  document.getElementById('year-btns').addEventListener('click', function (e) {
+    var btn = e.target.closest('.year-btn');
+    if (!btn) return;
+    document.querySelectorAll('.year-btn').forEach(function (b) { b.classList.remove('active-year'); });
+    btn.classList.add('active-year');
+    activeYear = btn.dataset.year;
+    applyFilters();
+  });
+
+  /* ── Live search (debounced 150 ms) ───────────────────────────────────── */
+  var searchTimer;
+  document.getElementById('search-input').addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    var val = this.value;
+    searchTimer = setTimeout(function () {
+      activeSearch = val.toLowerCase();
+      applyFilters();
+    }, 150);
+  });
+
+  /* ── Category auto-filter ─────────────────────────────────────────────── */
+  document.getElementById('cat-filter').addEventListener('change', function () {
+    activeCatId = this.value;
+    applyFilters();
+  });
+
+  /* ── Reset ────────────────────────────────────────────────────────────── */
+  document.getElementById('btn-reset-filters').addEventListener('click', function () {
+    activeYear = ''; activeSearch = ''; activeCatId = '';
+    document.getElementById('search-input').value = '';
+    document.getElementById('cat-filter').value = '';
+    document.querySelectorAll('.year-btn').forEach(function (b) { b.classList.remove('active-year'); });
+    document.querySelector('.year-btn[data-year=""]').classList.add('active-year');
+    applyFilters();
+  });
+
+  function applyFilters() {
+    ALL_ROWS.forEach(function (row) {
+      var date    = row.getAttribute('data-date') || '';
+      var op      = (row.getAttribute('data-op') || '').toLowerCase();
+      var catId   = row.getAttribute('data-cat') || '';
+      var yearOk  = !activeYear || date.startsWith(activeYear);
+      var searchOk = !activeSearch || op.includes(activeSearch);
+      var catOk   = !activeCatId || catId === activeCatId;
+      row.style.display = (yearOk && searchOk && catOk) ? '' : 'none';
+    });
+  }
+
+  /* ── Year button active style ─────────────────────────────────────────── */
+  var styleTag = document.createElement('style');
+  styleTag.textContent = '.year-btn.active-year{background-color:#4f46e5!important;color:white!important;}';
+  document.head.appendChild(styleTag);
+
+  /* ── Edit modal ───────────────────────────────────────────────────────── */
+  var editModal  = document.getElementById('edit-modal');
+  var editForm   = document.getElementById('edit-form');
+  var editError  = document.getElementById('edit-error');
+  var editCancel = document.getElementById('edit-cancel');
 
   function openEdit(btn) {
-    document.getElementById('edit-tx-id').value       = btn.dataset.id;
-    document.getElementById('edit-date').value        = btn.dataset.date;
-    document.getElementById('edit-operation').value   = btn.dataset.operation;
-    document.getElementById('edit-amount').value      = btn.dataset.amount;
-    document.getElementById('edit-currency').value    = btn.dataset.currencyId;
-    document.getElementById('edit-category').value    = btn.dataset.categoryId || '';
-    document.getElementById('edit-share').value       = btn.dataset.share || '';
-    document.getElementById('edit-notes').value       = btn.dataset.notes || '';
+    document.getElementById('edit-tx-id').value     = btn.dataset.id;
+    document.getElementById('edit-date').value      = btn.dataset.date;
+    document.getElementById('edit-operation').value = btn.dataset.operation;
+    document.getElementById('edit-amount').value    = btn.dataset.amount;
+    document.getElementById('edit-currency').value  = btn.dataset.currencyId;
+    document.getElementById('edit-category').value  = btn.dataset.categoryId || '';
+    document.getElementById('edit-share').value     = btn.dataset.share || '';
+    document.getElementById('edit-notes').value     = btn.dataset.notes || '';
     editError.style.display = 'none';
     editModal.style.display = 'flex';
   }
-
   editCancel.addEventListener('click', function () { editModal.style.display = 'none'; });
-  editModal.addEventListener('click', function (e) {
-    if (e.target === editModal) editModal.style.display = 'none';
-  });
+  editModal.addEventListener('click', function (e) { if (e.target === editModal) editModal.style.display = 'none'; });
 
   editForm.addEventListener('submit', async function (e) {
     e.preventDefault();
     var id = document.getElementById('edit-tx-id').value;
     var params = new URLSearchParams(new FormData(editForm));
-    params.delete(''); // remove empty name field if any
     try {
       var r    = await fetch('/transactions/' + id + '/update', { method: 'POST', body: params });
       var data = await r.json();
@@ -181,22 +428,20 @@
     }
   });
 
-  // ── Delete modal ─────────────────────────────────────────────────────────────
+  /* ── Delete modal ─────────────────────────────────────────────────────── */
   var delModal   = document.getElementById('del-modal');
   var delConfirm = document.getElementById('del-confirm');
   var delCancel  = document.getElementById('del-cancel');
   var delOp      = document.getElementById('del-modal-op');
+  var delTxId    = null;
 
   function openDelete(btn) {
     delTxId = btn.dataset.id;
     delOp.textContent = btn.dataset.operation;
     delModal.style.display = 'flex';
   }
-
   delCancel.addEventListener('click', function () { delModal.style.display = 'none'; });
-  delModal.addEventListener('click', function (e) {
-    if (e.target === delModal) delModal.style.display = 'none';
-  });
+  delModal.addEventListener('click', function (e) { if (e.target === delModal) delModal.style.display = 'none'; });
 
   delConfirm.addEventListener('click', async function () {
     if (!delTxId) return;
@@ -206,17 +451,47 @@
       var data = await r.json();
       if (data.ok) {
         var row = document.getElementById('tx-row-' + delTxId);
-        if (row) row.remove();
+        if (row) { ALL_ROWS.splice(ALL_ROWS.indexOf(row), 1); row.remove(); }
         showToast('Transaction supprimée.');
+      } else { alert('Erreur : ' + (data.error || 'Suppression échouée')); }
+    } catch (err) { alert('Erreur réseau : ' + err.message); }
+  });
+
+  /* ── Manual transaction modal ─────────────────────────────────────────── */
+  var manualModal  = document.getElementById('manual-modal');
+  var manualForm   = document.getElementById('manual-form');
+  var manualError  = document.getElementById('manual-error');
+  var manualCancel = document.getElementById('manual-cancel');
+  var manualDate   = document.getElementById('manual-date');
+
+  document.getElementById('btn-add-manual').addEventListener('click', function () {
+    manualDate.value = new Date().toISOString().slice(0, 10);
+    manualError.style.display = 'none';
+    manualModal.style.display = 'flex';
+  });
+  manualCancel.addEventListener('click', function () { manualModal.style.display = 'none'; });
+  manualModal.addEventListener('click', function (e) { if (e.target === manualModal) manualModal.style.display = 'none'; });
+
+  manualForm.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var params = new URLSearchParams(new FormData(manualForm));
+    try {
+      var r = await fetch('/transactions/manual', { method: 'POST', body: params });
+      if (r.ok || r.redirected) {
+        manualModal.style.display = 'none';
+        showToast('Transaction ajoutée.');
+        setTimeout(function () { window.location.reload(); }, 800);
       } else {
-        alert('Erreur : ' + (data.error || 'Suppression échouée'));
+        manualError.textContent = 'Erreur lors de l\'ajout.';
+        manualError.style.display = '';
       }
     } catch (err) {
-      alert('Erreur réseau : ' + err.message);
+      manualError.textContent = 'Erreur réseau : ' + err.message;
+      manualError.style.display = '';
     }
   });
 
-  // ── Button delegation (handles rows added by HTMX) ──────────────────────────
+  /* ── Button delegation ────────────────────────────────────────────────── */
   document.getElementById('tx-tbody').addEventListener('click', function (e) {
     var btn = e.target.closest('.btn-edit-tx');
     if (btn) { openEdit(btn); return; }
@@ -224,7 +499,165 @@
     if (btn) { openDelete(btn); }
   });
 
-  // ── Toast ────────────────────────────────────────────────────────────────────
+  /* ── CSV export ───────────────────────────────────────────────────────── */
+  document.getElementById('btn-export-csv').addEventListener('click', function () {
+    var rows = ALL_ROWS.filter(function (r) { return r.style.display !== 'none'; });
+    var lines = [['Date','Opération','Catégorie','Payé par','Part (%)','Statut','Montant'].join(',')];
+    rows.forEach(function (r) {
+      var cells = r.querySelectorAll('td');
+      var line = Array.from(cells).slice(0, 7).map(function (td) {
+        return '"' + td.textContent.trim().replace(/"/g, '""') + '"';
+      });
+      lines.push(line.join(','));
+    });
+    var blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    var url  = URL.createObjectURL(blob);
+    var a    = document.createElement('a');
+    a.href = url; a.download = 'transactions.csv'; a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  /* ── Carousel ─────────────────────────────────────────────────────────── */
+  var PENDING = {{ pending_json | safe }};
+  var cIdx    = 0;
+  var overlay = document.getElementById('carousel-overlay');
+
+  function pendingLabel() {
+    return (cIdx + 1) + ' / ' + PENDING.length;
+  }
+
+  function loadCard(i, dir) {
+    if (PENDING.length === 0) { overlay.style.display = 'none'; return; }
+    cIdx = ((i % PENDING.length) + PENDING.length) % PENDING.length;
+    var t = PENDING[cIdx];
+
+    // Animate the body in the appropriate direction
+    var body = document.getElementById('carousel-body');
+    body.classList.remove('carousel-in-right', 'carousel-in-left', 'carousel-fade-in');
+    void body.offsetWidth; // force reflow so the animation restarts
+    if (dir === undefined || dir === 0) body.classList.add('carousel-fade-in');
+    else if (dir > 0)                   body.classList.add('carousel-in-right');
+    else                                body.classList.add('carousel-in-left');
+
+    document.getElementById('carousel-counter').textContent = pendingLabel();
+    document.getElementById('c-date').textContent      = t.date;
+    document.getElementById('c-operation').textContent = t.operation;
+
+    var amtEl = document.getElementById('c-amount');
+    amtEl.textContent = (t.amount < 0 ? '−' : '+') +
+      Math.abs(t.amount).toFixed(2) + ' ' + t.currency_symbol;
+    amtEl.style.color = t.amount < 0 ? '#ef4444' : '#16a34a';
+
+    var noteEl = document.getElementById('c-parse-note');
+    if (t.parse_note) {
+      noteEl.textContent = t.parse_note; noteEl.style.display = '';
+    } else { noteEl.style.display = 'none'; }
+
+    var isBroken = t.status_name === 'broken';
+    document.getElementById('c-operation-row').style.display = isBroken ? '' : 'none';
+    document.getElementById('c-amount-row').style.display    = isBroken ? '' : 'none';
+    if (isBroken) {
+      document.getElementById('c-op-input').value  = t.operation;
+      document.getElementById('c-amt-input').value = t.amount;
+    }
+
+    document.getElementById('c-category').value = t.category_id || '';
+    document.getElementById('c-share').value     = t.other_share || '';
+    document.getElementById('c-notes').value     = t.notes || '';
+    document.getElementById('c-save-status').textContent = '';
+
+    document.getElementById('c-prev').disabled = PENDING.length <= 1;
+    document.getElementById('c-next').disabled = PENDING.length <= 1;
+  }
+
+  async function saveAndNavigate(direction) {
+    if (PENDING.length === 0) return;
+    var t = PENDING[cIdx];
+    var catId  = document.getElementById('c-category').value;
+    var share  = document.getElementById('c-share').value;
+    var notes  = document.getElementById('c-notes').value;
+    var opVal  = document.getElementById('c-op-input').value;
+    var amtVal = document.getElementById('c-amt-input').value;
+
+    var isComplete = catId !== '' && share !== '';
+    var params = new URLSearchParams();
+    if (opVal)  params.set('operation',  opVal);
+    if (amtVal) params.set('amount',     amtVal);
+    if (catId)  params.set('category_id', catId);
+    if (share)  params.set('other_share', share);
+    params.set('notes', notes);
+
+    var statusEl = document.getElementById('c-save-status');
+    statusEl.textContent = 'Enregistrement…';
+    try {
+      var r = await fetch('/transactions/' + t.id + '/update', { method: 'POST', body: params });
+      var data = await r.json();
+      if (!data.ok) { statusEl.textContent = 'Erreur: ' + (data.error || '?'); return; }
+      statusEl.textContent = isComplete ? '✓ Complétée' : '✓ Sauvegardé';
+
+      if (isComplete) {
+        markRowComplete(t.id);
+        PENDING.splice(cIdx, 1);
+        updateCarouselBadge();
+        if (PENDING.length === 0) {
+          overlay.style.display = 'none';
+          showToast('Toutes les transactions sont complètes !');
+          return;
+        }
+        cIdx = Math.min(cIdx, PENDING.length - 1);
+        loadCard(cIdx, direction);
+      } else {
+        loadCard(cIdx + direction, direction);
+      }
+    } catch (err) { statusEl.textContent = 'Erreur réseau'; }
+  }
+
+  function markRowComplete(txId) {
+    var row = document.getElementById('tx-row-' + txId);
+    if (!row) return;
+    // Replace the status badge (6th td, index 5)
+    var cells = row.querySelectorAll('td');
+    if (cells[5]) {
+      cells[5].innerHTML =
+        '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium' +
+        ' bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">' +
+        '<i class="fas fa-check"></i> Complète</span>';
+    }
+    // Brief green flash on the row
+    row.style.transition = 'background-color 0.6s ease';
+    row.style.backgroundColor = 'rgba(22,163,74,0.12)';
+    setTimeout(function () { row.style.backgroundColor = ''; }, 1400);
+  }
+
+  function updateCarouselBadge() {
+    var btn = document.getElementById('btn-open-carousel');
+    if (!btn) return;
+    if (PENDING.length === 0) {
+      btn.style.display = 'none';
+    } else {
+      btn.innerHTML = '<i class="fas fa-tasks mr-1"></i> Compléter (' + PENDING.length + ')';
+    }
+  }
+
+  var openBtn = document.getElementById('btn-open-carousel');
+  if (openBtn) {
+    openBtn.addEventListener('click', function () {
+      if (PENDING.length === 0) return;
+      loadCard(0, 0);
+      overlay.style.display = 'flex';
+    });
+  }
+
+  overlay.addEventListener('click', function (e) {
+    if (e.target === overlay) overlay.style.display = 'none';
+  });
+  document.getElementById('carousel-close').addEventListener('click', function () {
+    overlay.style.display = 'none';
+  });
+  document.getElementById('c-prev').addEventListener('click', function () { saveAndNavigate(-1); });
+  document.getElementById('c-next').addEventListener('click', function () { saveAndNavigate(1); });
+
+  /* ── Toast ────────────────────────────────────────────────────────────── */
   function showToast(msg) {
     var t = document.getElementById('tx-toast');
     document.getElementById('tx-toast-msg').textContent = msg;

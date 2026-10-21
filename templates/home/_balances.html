@@ -1,0 +1,77 @@
+{% if pair_balances %}
+<div class="space-y-4">
+  {% for pb in pair_balances %}
+  <div class="rounded-xl border border-gray-200 dark:border-slate-600 overflow-hidden">
+
+    <!-- User breakdown rows -->
+    <div class="grid grid-cols-2 divide-x divide-gray-200 dark:divide-slate-600">
+
+      <!-- User 1 -->
+      <div class="p-4 space-y-2">
+        <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide truncate">
+          {{ pb.user1_name }}
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-gray-500 dark:text-gray-400">Total payé</span>
+          <span class="font-semibold">{{ pb.user1_paid_total | fixed2 }} {{ pb.currency_symbol }}</span>
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-gray-500 dark:text-gray-400">Pour lui/elle</span>
+          <span>{{ pb.user1_paid_for_self | fixed2 }} {{ pb.currency_symbol }}</span>
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-gray-500 dark:text-gray-400">Pour {{ pb.user2_name }}</span>
+          <span class="text-blue-600 dark:text-blue-400 font-medium">{{ pb.user1_paid_for_other | fixed2 }} {{ pb.currency_symbol }}</span>
+        </div>
+      </div>
+
+      <!-- User 2 -->
+      <div class="p-4 space-y-2">
+        <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide truncate">
+          {{ pb.user2_name }}
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-gray-500 dark:text-gray-400">Total payé</span>
+          <span class="font-semibold">{{ pb.user2_paid_total | fixed2 }} {{ pb.currency_symbol }}</span>
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-gray-500 dark:text-gray-400">Pour lui/elle</span>
+          <span>{{ pb.user2_paid_for_self | fixed2 }} {{ pb.currency_symbol }}</span>
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-gray-500 dark:text-gray-400">Pour {{ pb.user1_name }}</span>
+          <span class="text-blue-600 dark:text-blue-400 font-medium">{{ pb.user2_paid_for_other | fixed2 }} {{ pb.currency_symbol }}</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Net balance footer -->
+    <div class="px-4 py-3 bg-gray-50 dark:bg-slate-700/60 border-t border-gray-200 dark:border-slate-600 flex items-center justify-between">
+      {% if pb.net_amount > 0 %}
+        <div class="flex items-center gap-2 text-sm">
+          <i class="fas fa-arrow-right text-orange-500 text-xs"></i>
+          <span>
+            <strong>{{ pb.debtor }}</strong>
+            <span class="text-gray-500 dark:text-gray-400 mx-1">doit à</span>
+            <strong>{{ pb.creditor }}</strong>
+          </span>
+        </div>
+        <span class="font-bold text-lg text-orange-500">{{ pb.net_amount | fixed2 }} {{ pb.currency_symbol }}</span>
+      {% else %}
+        <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+          <i class="fas fa-check-circle text-green-400"></i>
+          <span>Équilibre parfait</span>
+        </div>
+        <span class="font-bold text-lg text-green-500">0.00 {{ pb.currency_symbol }}</span>
+      {% endif %}
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-gray-400 text-sm py-3 text-center">
+  <i class="fas fa-check-circle text-green-400 mr-1"></i> Aucune transaction partagée complète.
+</p>
+{% endif %}

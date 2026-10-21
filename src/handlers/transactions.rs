@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
-    response::{Html, IntoResponse, Json, Redirect},
+    response::{Html, IntoResponse, Json},
     Form,
 };
 use axum_extra::extract::CookieJar;
@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use crate::{
     error::{AppError, AppResult},
-    models::{Category, Currency, TransactionView, User},
+    models::{Category, Currency, TransactionView},
     AppState,
 };
 use super::{base_context, get_user_id, is_htmx, htmx_redirect};
@@ -48,47 +48,36 @@ pub async fn get_transactions(
         .await?;
     let current_user_id = super::get_user_id(&jar)?;
 
+    // Pending/broken transactions for the "complete" carousel (user's own only)
+    let pending_filter = TransactionFilter::default();
+    let all_pending = fetch_transaction_views(&state.db, true, &pending_filter).await?;
+    let user_pending: Vec<&crate::models::TransactionView> = all_pending
+        .iter()
+        .filter(|t| t.paid_by_id == current_user_id)
+        .collect();
+    let pending_json = serde_json::to_string(&user_pending)
+        .unwrap_or_else(|_| "[]".to_string());
+
+    let default_currency_id: i64 = crate::db::get_setting(&state.db, "default_currency_id")
+        .await
+        .unwrap_or_else(|_| "1".to_string())
+        .parse()
+        .unwrap_or(1);
+
     ctx.insert("transactions", &transactions);
     ctx.insert("categories", &categories);
     ctx.insert("currencies", &currencies);
     ctx.insert("current_user_id", &current_user_id);
     ctx.insert("filter", &filter.search);
     ctx.insert("filter_category", &filter.category_id);
+    ctx.insert("pending_json", &pending_json);
+    ctx.insert("pending_count", &user_pending.len());
+    ctx.insert("default_currency_id", &default_currency_id);
 
     let html = state.tera.render("transactions/list.html", &ctx)?;
     Ok(Html(html))
 }
 
-pub async fn get_incomplete(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> AppResult<Html<String>> {
-    let mut ctx = base_context(&jar, &state.db).await?;
-
-    let filter = TransactionFilter::default();
-    let all_incomplete = fetch_transaction_views(&state.db, true, &filter).await?;
-    let (broken_transactions, pending_transactions): (Vec<TransactionView>, Vec<TransactionView>) =
-        all_incomplete.into_iter().partition(|t| t.status_name == "broken");
-
-    let categories = sqlx::query_as::<_, Category>("SELECT * FROM categories ORDER BY name")
-        .fetch_all(&state.db)
-        .await?;
-    let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
-        .fetch_all(&state.db)
-        .await?;
-    let currencies = sqlx::query_as::<_, Currency>("SELECT * FROM currencies ORDER BY name")
-        .fetch_all(&state.db)
-        .await?;
-
-    ctx.insert("broken_transactions", &broken_transactions);
-    ctx.insert("transactions", &pending_transactions);
-    ctx.insert("categories", &categories);
-    ctx.insert("users", &users);
-    ctx.insert("currencies", &currencies);
-
-    let html = state.tera.render("transactions/incomplete.html", &ctx)?;
-    Ok(Html(html))
-}
 
 #[derive(Deserialize)]
 pub struct UpdateTransactionForm {
@@ -96,10 +85,11 @@ pub struct UpdateTransactionForm {
     pub operation: Option<String>,
     pub amount: Option<f64>,
     pub currency_id: Option<i64>,
-    pub category_id: Option<i64>,
-    pub other_share: Option<f64>,
+    // Kept as String so that an empty-string submission ("—" option) deserialises as None
+    // rather than causing a 422 parse error before the handler even runs.
+    pub category_id: Option<String>,
+    pub other_share: Option<String>,
     pub notes: Option<String>,
-    pub mark_complete: Option<String>,
 }
 
 pub async fn post_update_transaction(
@@ -111,24 +101,33 @@ pub async fn post_update_transaction(
 ) -> AppResult<impl IntoResponse> {
     let user_id = super::get_user_id(&jar)?;
 
-    let marking_complete = form.mark_complete.as_deref() == Some("1")
-        && form.category_id.is_some()
-        && form.other_share.is_some();
+    // Parse optional numeric fields — empty string means the user cleared the field (→ None).
+    let category_id: Option<i64> = form.category_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse().ok());
 
-    let status_id: i64 = if marking_complete { 2 } else { 1 };
+    let other_share: Option<f64> = form.other_share
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse().ok());
+
+    // Status is determined purely from the data: both fields set → complete, either null → pending.
+    let is_complete = category_id.is_some() && other_share.is_some();
+    let status_id: i64 = if is_complete { 2 } else { 1 };
 
     sqlx::query(
         "UPDATE transactions \
-         SET date           = COALESCE(?, date), \
+         SET date             = COALESCE(?, date), \
              transaction_date = COALESCE(?, transaction_date), \
-             operation      = COALESCE(?, operation), \
-             amount         = COALESCE(?, amount), \
-             currency_id    = COALESCE(?, currency_id), \
-             category_id    = ?, \
-             other_share    = ?, \
-             notes          = ?, \
-             status_id      = ?, \
-             parse_note     = NULL \
+             operation        = COALESCE(?, operation), \
+             amount           = COALESCE(?, amount), \
+             currency_id      = COALESCE(?, currency_id), \
+             category_id      = ?, \
+             other_share      = ?, \
+             notes            = ?, \
+             status_id        = ?, \
+             parse_note       = NULL \
          WHERE id = ? AND paid_by = ?",
     )
     .bind(form.date.as_deref())
@@ -136,8 +135,8 @@ pub async fn post_update_transaction(
     .bind(form.operation.as_deref())
     .bind(form.amount)
     .bind(form.currency_id)
-    .bind(form.category_id)
-    .bind(form.other_share)
+    .bind(category_id)
+    .bind(other_share)
     .bind(&form.notes)
     .bind(status_id)
     .bind(id)
@@ -145,16 +144,9 @@ pub async fn post_update_transaction(
     .execute(&state.db)
     .await?;
 
-    tracing::info!(id = %id, user_id = %user_id, "Transaction updated");
+    tracing::info!(id = %id, user_id = %user_id, is_complete = %is_complete, "Transaction updated");
 
-    if is_htmx(&headers) {
-        if marking_complete {
-            return Ok("".into_response());
-        }
-        return Ok(htmx_redirect("/incomplete-transactions").into_response());
-    }
-    // Called via fetch() from the list page — return JSON so JS can handle it
-    Ok(Json(serde_json::json!({ "ok": true })).into_response())
+    Ok(Json(serde_json::json!({ "ok": true, "complete": is_complete })).into_response())
 }
 
 pub async fn post_delete_transaction(
@@ -197,8 +189,8 @@ pub struct ManualTransactionForm {
     pub operation: String,
     pub amount: f64,
     pub currency_id: i64,
-    pub category_id: Option<i64>,
-    pub other_share: Option<f64>,
+    pub category_id: Option<String>,
+    pub other_share: Option<String>,
     pub notes: Option<String>,
 }
 
@@ -229,7 +221,17 @@ pub async fn post_manual_transaction(
         .await?
     };
 
-    let status_id: i64 = if form.category_id.is_some() && form.other_share.is_some() { 2 } else { 1 };
+    let category_id: Option<i64> = form.category_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse().ok());
+
+    let other_share: Option<f64> = form.other_share
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse().ok());
+
+    let status_id: i64 = if category_id.is_some() && other_share.is_some() { 2 } else { 1 };
 
     let default_currency_id: i64 = crate::db::get_setting(&state.db, "default_currency_id")
         .await
@@ -246,19 +248,21 @@ pub async fn post_manual_transaction(
     .bind(&form.operation)
     .bind(form.amount)
     .bind(if form.currency_id > 0 { form.currency_id } else { default_currency_id })
-    .bind(form.category_id)
+    .bind(category_id)
     .bind(user_id)
-    .bind(form.other_share)
+    .bind(other_share)
     .bind(status_id)
     .bind(file_id)
     .bind(&form.notes)
     .execute(&state.db)
     .await?;
 
+    tracing::info!(user_id = %user_id, "Manual transaction added");
+
     if is_htmx(&headers) {
-        Ok(htmx_redirect("/").into_response())
+        Ok(htmx_redirect("/transactions").into_response())
     } else {
-        Ok(Redirect::to("/").into_response())
+        Ok(Json(serde_json::json!({ "ok": true })).into_response())
     }
 }
 

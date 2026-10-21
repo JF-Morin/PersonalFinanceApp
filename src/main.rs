@@ -99,7 +99,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/logout", post(handlers::auth::post_logout))
         // Main pages
         .route("/",                        get(handlers::home::get_home))
-        .route("/dashboard",               get(handlers::dashboard::get_dashboard))
+        .route("/home/balances",           get(handlers::home::get_balances_partial))
+        .route("/home/chart-data",         get(handlers::home::get_chart_data))
         .route("/settings",                get(handlers::settings::get_settings)
                                           .post(handlers::settings::post_settings))
         .route("/settings/users",          post(handlers::settings::post_new_user))
@@ -108,7 +109,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/settings/password",       post(handlers::settings::post_change_password))
         // Transactions
         .route("/transactions",            get(handlers::transactions::get_transactions))
-        .route("/incomplete-transactions", get(handlers::transactions::get_incomplete))
         .route("/transactions/:id/update", post(handlers::transactions::post_update_transaction))
         .route("/transactions/:id/delete", post(handlers::transactions::post_delete_transaction))
         .route("/transactions/manual",     post(handlers::transactions::post_manual_transaction))

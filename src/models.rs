@@ -104,11 +104,23 @@ pub struct TransactionView {
     pub parse_note: Option<String>,
 }
 
-/// Balance owed between two users.
+/// Per-user breakdown and net balance for a user pair + currency.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Balance {
-    pub from_user: String,
-    pub to_user: String,
-    pub amount: f64,
+pub struct UserPairBalance {
+    pub user1_name: String,
+    pub user1_paid_total: f64,       // sum of |amount| for all their transactions
+    pub user1_paid_for_self: f64,    // amount they kept for themselves
+    pub user1_paid_for_other: f64,   // amount they covered for the other
+
+    pub user2_name: String,
+    pub user2_paid_total: f64,
+    pub user2_paid_for_self: f64,
+    pub user2_paid_for_other: f64,
+
+    /// Who owes money (empty if balanced).
+    pub debtor: String,
+    /// Who is owed money (empty if balanced).
+    pub creditor: String,
+    pub net_amount: f64,
     pub currency_symbol: String,
 }
