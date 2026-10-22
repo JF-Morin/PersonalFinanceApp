@@ -5,20 +5,24 @@
 <div class="mb-5 flex flex-wrap items-center gap-3 justify-between">
   <h1 class="text-2xl font-bold">Transactions</h1>
   <div class="flex items-center gap-2 flex-wrap">
-    {% if pending_count > 0 %}
     <button id="btn-open-carousel"
             class="btn-primary"
             style="background:#f59e0b;border-color:#f59e0b">
-      <i class="fas fa-tasks mr-1"></i> Compléter ({{ pending_count }})
+      {% if pending_count > 0 %}
+      <i class="fas fa-tasks mr-1"></i> À compléter ({{ pending_count }})
+      {% else %}
+      <i class="fas fa-check-circle mr-1"></i> À compléter (0)
+      {% endif %}
     </button>
-    {% endif %}
     <button id="btn-add-manual" class="btn-secondary">
       <i class="fas fa-plus mr-1"></i> Ajouter
     </button>
     <button id="btn-export-csv" class="btn-secondary">
       <i class="fas fa-file-csv mr-1"></i> CSV
     </button>
-    <a href="/upload" class="btn-primary"><i class="fas fa-file-upload mr-1"></i> Importer</a>
+    <button id="btn-import" class="btn-primary">
+      <i class="fas fa-file-upload mr-1"></i> Importer
+    </button>
   </div>
 </div>
 
@@ -46,6 +50,74 @@
 .carousel-fade-in  { animation: carouselFadeIn  0.2s  cubic-bezier(.25,.46,.45,.94) both; }
 </style>
 
+<!-- ── Import modal ───────────────────────────────────────────────────────── -->
+<div id="import-modal"
+     style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px)"
+     class="flex items-center justify-center p-4">
+  <div class="card w-full max-w-xl relative" style="max-height:88vh;overflow-y:auto"
+       onclick="event.stopPropagation()">
+
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-base font-semibold">
+        <i class="fas fa-file-upload text-primary-600 mr-2"></i>Importer un relevé PDF
+      </h2>
+      <button id="im-close"
+              class="w-8 h-8 flex items-center justify-center rounded-full
+                     text-gray-400 hover:text-gray-700 dark:hover:text-white
+                     hover:bg-gray-100 dark:hover:bg-slate-700 border-none bg-transparent cursor-pointer">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+      Banques supportées :
+      {% for b in banks %}<strong>{{ b.name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+
+    <!-- Drop zone -->
+    <div id="im-drop-target"
+         class="border-2 border-dashed border-gray-300 dark:border-slate-600
+                rounded-xl p-8 text-center cursor-pointer transition-colors select-none mb-4">
+      <i class="fas fa-file-pdf text-4xl text-gray-300 dark:text-slate-500 mb-3 block"></i>
+      <p class="text-gray-500 dark:text-gray-400 text-sm">
+        Glissez des fichiers PDF ici ou
+        <span class="text-primary-600 font-medium">cliquez pour choisir</span>
+      </p>
+      <p class="text-xs text-gray-400 mt-1">Plusieurs fichiers acceptés</p>
+    </div>
+    <input type="file" id="im-file-input" accept=".pdf" multiple class="hidden">
+
+    <!-- Import summary -->
+    <div id="im-import-summary" style="display:none"
+         class="mb-4 rounded-xl border border-green-200 dark:border-green-800
+                bg-green-50 dark:bg-green-900/20 p-3">
+      <h3 class="text-sm font-semibold flex items-center gap-2
+                 text-green-700 dark:text-green-400 mb-2">
+        <i class="fas fa-check-circle"></i> Résumé de l'import
+      </h3>
+      <div id="im-summary-list" class="space-y-1"></div>
+    </div>
+
+    <!-- File queue -->
+    <div id="im-file-queue" style="display:none">
+      <div class="flex items-center gap-2 mb-3 pb-3 border-b border-gray-200 dark:border-slate-700">
+        <span class="text-xs font-semibold text-gray-700 dark:text-gray-200"
+              id="im-file-count">0 fichier(s)</span>
+        <button id="im-btn-analyze-all" class="btn-primary"
+                style="padding:0.4rem 0.9rem;font-size:0.875rem">
+          <i class="fas fa-play mr-1"></i> Analyser tout
+        </button>
+        <button id="im-btn-delete-all" class="btn-secondary"
+                style="padding:0.4rem 0.9rem;font-size:0.875rem">
+          <i class="fas fa-trash mr-1 text-red-500"></i> Tout supprimer
+        </button>
+      </div>
+      <div id="im-file-list" class="space-y-2" style="max-height:16rem;overflow-y:auto"></div>
+    </div>
+
+  </div>
+</div>
+
 <!-- ── Carousel modal ─────────────────────────────────────────────────────── -->
 <div id="carousel-overlay"
      style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px)"
@@ -56,7 +128,6 @@
        style="max-height:90vh;overflow-y:auto"
        onclick="event.stopPropagation()">
 
-    <!-- Header -->
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-base font-semibold text-gray-800 dark:text-white">
         <i class="fas fa-tasks text-amber-500 mr-2"></i>
@@ -69,59 +140,49 @@
       </button>
     </div>
 
-    <!-- Animated body -->
     <div id="carousel-body">
+      <div class="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4 mb-4">
+        <p id="c-date" class="text-xs text-gray-400 mb-1"></p>
+        <p id="c-operation" class="font-semibold text-gray-900 dark:text-white leading-tight"></p>
+        <p id="c-amount" class="text-lg font-bold mt-1"></p>
+        <p id="c-parse-note" class="text-xs text-amber-600 dark:text-amber-400 mt-1" style="display:none"></p>
+      </div>
 
-    <!-- Transaction info -->
-    <div class="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4 mb-4">
-      <p id="c-date" class="text-xs text-gray-400 mb-1"></p>
-      <p id="c-operation" class="font-semibold text-gray-900 dark:text-white leading-tight"></p>
-      <p id="c-amount" class="text-lg font-bold mt-1"></p>
-      <p id="c-parse-note" class="text-xs text-amber-600 dark:text-amber-400 mt-1" style="display:none"></p>
+      <div class="space-y-3">
+        <div id="c-operation-row" style="display:none">
+          <label class="label">Opération *</label>
+          <input id="c-op-input" type="text" class="input" placeholder="Description de l'opération">
+        </div>
+        <div id="c-amount-row" style="display:none">
+          <label class="label">Montant *</label>
+          <input id="c-amt-input" type="number" step="0.01" class="input">
+        </div>
+        <div>
+          <label class="label">Catégorie *</label>
+          <select id="c-category" class="input">
+            <option value="">— Choisir —</option>
+            {% for c in categories %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label">Part de l'autre (%) *</label>
+          <input id="c-share" type="number" min="0" max="100" step="1" class="input" placeholder="50">
+        </div>
+        <div>
+          <label class="label">Notes <span class="text-gray-400 font-normal">(optionnel)</span></label>
+          <input id="c-notes" type="text" class="input" placeholder="Note libre…">
+        </div>
+        <div id="c-save-status" class="text-xs h-4 text-gray-400"></div>
+      </div>
     </div>
 
-    <!-- Form fields -->
-    <div class="space-y-3">
-      <div id="c-operation-row" style="display:none">
-        <label class="label">Opération *</label>
-        <input id="c-op-input" type="text" class="input" placeholder="Description de l'opération">
-      </div>
-      <div id="c-amount-row" style="display:none">
-        <label class="label">Montant *</label>
-        <input id="c-amt-input" type="number" step="0.01" class="input">
-      </div>
-      <div>
-        <label class="label">Catégorie *</label>
-        <select id="c-category" class="input">
-          <option value="">— Choisir —</option>
-          {% for c in categories %}
-          <option value="{{ c.id }}">{{ c.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label class="label">Part de l'autre (%) *</label>
-        <input id="c-share" type="number" min="0" max="100" step="1" class="input" placeholder="50">
-      </div>
-      <div>
-        <label class="label">Notes <span class="text-gray-400 font-normal">(optionnel)</span></label>
-        <input id="c-notes" type="text" class="input" placeholder="Note libre…">
-      </div>
-      <div id="c-save-status" class="text-xs h-4 text-gray-400"></div>
-    </div>
-
-    </div><!-- end #carousel-body -->
-
-    <!-- Navigation -->
     <div class="flex items-center justify-between mt-5 pt-4 border-t border-gray-200 dark:border-slate-700">
-      <button id="c-prev"
-              class="btn-secondary"
-              style="padding:0.5rem 1rem;font-size:0.875rem">
+      <button id="c-prev" class="btn-secondary" style="padding:0.5rem 1rem;font-size:0.875rem">
         <i class="fas fa-chevron-left mr-1"></i> Précédent
       </button>
-      <button id="c-next"
-              class="btn-primary"
-              style="padding:0.5rem 1rem;font-size:0.875rem">
+      <button id="c-next" class="btn-primary" style="padding:0.5rem 1rem;font-size:0.875rem">
         Suivant <i class="fas fa-chevron-right ml-1"></i>
       </button>
     </div>
@@ -253,7 +314,6 @@
 <!-- ── Filters ────────────────────────────────────────────────────────────── -->
 <div class="card mb-4">
   <div class="flex flex-wrap gap-3 items-end">
-    <!-- Year buttons -->
     <div>
       <label class="label">Année</label>
       <div class="flex gap-1 flex-wrap" id="year-btns">
@@ -261,13 +321,11 @@
                 style="padding:0.35rem 0.75rem;font-size:0.8125rem">Toutes</button>
       </div>
     </div>
-    <!-- Search -->
     <div class="flex-1 min-w-48">
       <label class="label">Recherche</label>
       <input type="text" id="search-input" value="{{ filter | default(value='') }}"
              placeholder="Opération…" class="input" autocomplete="off">
     </div>
-    <!-- Category -->
     <div>
       <label class="label">Catégorie</label>
       <select id="cat-filter" class="input">
@@ -287,7 +345,7 @@
     <table class="w-full">
       <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600">
         <tr>
-          <th class="table-header" style="min-width:9rem">Date</th>
+          <th class="table-header" style="min-width:8rem">Date</th>
           <th class="table-header" style="min-width:18rem">Opération</th>
           <th class="table-header" style="min-width:11rem">Catégorie</th>
           <th class="table-header" style="min-width:9rem">Payé par</th>
@@ -310,11 +368,11 @@
   var ALL_ROWS = Array.from(document.querySelectorAll('#tx-tbody tr[data-date]'));
 
   /* ── Filter state ─────────────────────────────────────────────────────── */
-  var activeYear    = '';
-  var activeSearch  = (document.getElementById('search-input').value || '').toLowerCase();
-  var activeCatId   = document.getElementById('cat-filter').value;
+  var activeYear   = '';
+  var activeSearch = (document.getElementById('search-input').value || '').toLowerCase();
+  var activeCatId  = document.getElementById('cat-filter').value;
 
-  /* ── Year buttons (built from actual data) ────────────────────────────── */
+  /* ── Year buttons ─────────────────────────────────────────────────────── */
   (function buildYears() {
     var years = new Set();
     ALL_ROWS.forEach(function (r) {
@@ -342,24 +400,18 @@
     applyFilters();
   });
 
-  /* ── Live search (debounced 150 ms) ───────────────────────────────────── */
   var searchTimer;
   document.getElementById('search-input').addEventListener('input', function () {
     clearTimeout(searchTimer);
     var val = this.value;
-    searchTimer = setTimeout(function () {
-      activeSearch = val.toLowerCase();
-      applyFilters();
-    }, 150);
+    searchTimer = setTimeout(function () { activeSearch = val.toLowerCase(); applyFilters(); }, 150);
   });
 
-  /* ── Category auto-filter ─────────────────────────────────────────────── */
   document.getElementById('cat-filter').addEventListener('change', function () {
     activeCatId = this.value;
     applyFilters();
   });
 
-  /* ── Reset ────────────────────────────────────────────────────────────── */
   document.getElementById('btn-reset-filters').addEventListener('click', function () {
     activeYear = ''; activeSearch = ''; activeCatId = '';
     document.getElementById('search-input').value = '';
@@ -374,14 +426,13 @@
       var date    = row.getAttribute('data-date') || '';
       var op      = (row.getAttribute('data-op') || '').toLowerCase();
       var catId   = row.getAttribute('data-cat') || '';
-      var yearOk  = !activeYear || date.startsWith(activeYear);
+      var yearOk  = !activeYear  || date.startsWith(activeYear);
       var searchOk = !activeSearch || op.includes(activeSearch);
       var catOk   = !activeCatId || catId === activeCatId;
       row.style.display = (yearOk && searchOk && catOk) ? '' : 'none';
     });
   }
 
-  /* ── Year button active style ─────────────────────────────────────────── */
   var styleTag = document.createElement('style');
   styleTag.textContent = '.year-btn.active-year{background-color:#4f46e5!important;color:white!important;}';
   document.head.appendChild(styleTag);
@@ -522,24 +573,19 @@
   var cIdx    = 0;
   var overlay = document.getElementById('carousel-overlay');
 
-  function pendingLabel() {
-    return (cIdx + 1) + ' / ' + PENDING.length;
-  }
-
   function loadCard(i, dir) {
     if (PENDING.length === 0) { overlay.style.display = 'none'; return; }
     cIdx = ((i % PENDING.length) + PENDING.length) % PENDING.length;
     var t = PENDING[cIdx];
 
-    // Animate the body in the appropriate direction
     var body = document.getElementById('carousel-body');
     body.classList.remove('carousel-in-right', 'carousel-in-left', 'carousel-fade-in');
-    void body.offsetWidth; // force reflow so the animation restarts
+    void body.offsetWidth;
     if (dir === undefined || dir === 0) body.classList.add('carousel-fade-in');
     else if (dir > 0)                   body.classList.add('carousel-in-right');
     else                                body.classList.add('carousel-in-left');
 
-    document.getElementById('carousel-counter').textContent = pendingLabel();
+    document.getElementById('carousel-counter').textContent = (cIdx + 1) + ' / ' + PENDING.length;
     document.getElementById('c-date').textContent      = t.date;
     document.getElementById('c-operation').textContent = t.operation;
 
@@ -549,9 +595,8 @@
     amtEl.style.color = t.amount < 0 ? '#ef4444' : '#16a34a';
 
     var noteEl = document.getElementById('c-parse-note');
-    if (t.parse_note) {
-      noteEl.textContent = t.parse_note; noteEl.style.display = '';
-    } else { noteEl.style.display = 'none'; }
+    if (t.parse_note) { noteEl.textContent = t.parse_note; noteEl.style.display = ''; }
+    else { noteEl.style.display = 'none'; }
 
     var isBroken = t.status_name === 'broken';
     document.getElementById('c-operation-row').style.display = isBroken ? '' : 'none';
@@ -615,7 +660,6 @@
   function markRowComplete(txId) {
     var row = document.getElementById('tx-row-' + txId);
     if (!row) return;
-    // Replace the status badge (6th td, index 5)
     var cells = row.querySelectorAll('td');
     if (cells[5]) {
       cells[5].innerHTML =
@@ -623,7 +667,6 @@
         ' bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">' +
         '<i class="fas fa-check"></i> Complète</span>';
     }
-    // Brief green flash on the row
     row.style.transition = 'background-color 0.6s ease';
     row.style.backgroundColor = 'rgba(22,163,74,0.12)';
     setTimeout(function () { row.style.backgroundColor = ''; }, 1400);
@@ -633,27 +676,28 @@
     var btn = document.getElementById('btn-open-carousel');
     if (!btn) return;
     if (PENDING.length === 0) {
-      btn.style.display = 'none';
+      btn.innerHTML = '<i class="fas fa-check-circle mr-1"></i> À compléter (0)';
     } else {
-      btn.innerHTML = '<i class="fas fa-tasks mr-1"></i> Compléter (' + PENDING.length + ')';
+      btn.innerHTML = '<i class="fas fa-tasks mr-1"></i> À compléter (' + PENDING.length + ')';
     }
   }
 
   var openBtn = document.getElementById('btn-open-carousel');
   if (openBtn) {
     openBtn.addEventListener('click', function () {
-      if (PENDING.length === 0) return;
+      if (PENDING.length === 0) {
+        overlay.style.display = 'flex';
+        document.getElementById('carousel-body').innerHTML =
+          '<p class="text-center text-gray-400 py-12"><i class="fas fa-check-circle text-green-400 text-3xl mb-3 block"></i>Toutes les transactions sont complètes !</p>';
+        return;
+      }
       loadCard(0, 0);
       overlay.style.display = 'flex';
     });
   }
 
-  overlay.addEventListener('click', function (e) {
-    if (e.target === overlay) overlay.style.display = 'none';
-  });
-  document.getElementById('carousel-close').addEventListener('click', function () {
-    overlay.style.display = 'none';
-  });
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.style.display = 'none'; });
+  document.getElementById('carousel-close').addEventListener('click', function () { overlay.style.display = 'none'; });
   document.getElementById('c-prev').addEventListener('click', function () { saveAndNavigate(-1); });
   document.getElementById('c-next').addEventListener('click', function () { saveAndNavigate(1); });
 
@@ -663,6 +707,251 @@
     document.getElementById('tx-toast-msg').textContent = msg;
     t.style.display = 'flex';
     setTimeout(function () { t.style.display = 'none'; }, 3500);
+  }
+})();
+</script>
+
+<!-- ── Import modal JS ────────────────────────────────────────────────────── -->
+<script>
+(function () {
+  var modal    = document.getElementById('import-modal');
+  var btnOpen  = document.getElementById('btn-import');
+  var btnClose = document.getElementById('im-close');
+  var anyImported = false;
+
+  function openModal()  { modal.style.display = 'flex'; }
+  function closeModal() {
+    modal.style.display = 'none';
+    if (anyImported) window.location.reload();
+  }
+
+  btnOpen.addEventListener('click', openModal);
+  btnClose.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+  /* ── Queue ─────────────────────────────────────────────────────────────── */
+  var queue  = [];
+  var nextId = 0;
+
+  var dropTarget    = document.getElementById('im-drop-target');
+  var fileInput     = document.getElementById('im-file-input');
+  var queueCard     = document.getElementById('im-file-queue');
+  var fileList      = document.getElementById('im-file-list');
+  var fileCount     = document.getElementById('im-file-count');
+  var btnAnalyzeAll = document.getElementById('im-btn-analyze-all');
+  var btnDeleteAll  = document.getElementById('im-btn-delete-all');
+
+  dropTarget.addEventListener('click', function () { fileInput.click(); });
+  dropTarget.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    dropTarget.style.borderColor = '#4f46e5';
+    dropTarget.style.backgroundColor = 'rgba(79,70,229,0.05)';
+  });
+  dropTarget.addEventListener('dragleave', function () {
+    dropTarget.style.borderColor = '';
+    dropTarget.style.backgroundColor = '';
+  });
+  dropTarget.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dropTarget.style.borderColor = '';
+    dropTarget.style.backgroundColor = '';
+    addFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', function () { addFiles(fileInput.files); fileInput.value = ''; });
+  btnAnalyzeAll.addEventListener('click', analyzeAll);
+  btnDeleteAll.addEventListener('click', deleteAll);
+
+  function addFiles(files) {
+    Array.from(files).forEach(function (f) {
+      if (!f.name.toLowerCase().endsWith('.pdf')) return;
+      var item = { id: nextId++, file: f, status: 'pending', el: null };
+      item.el = buildRow(item);
+      queue.push(item);
+      fileList.appendChild(item.el);
+    });
+    refresh();
+  }
+
+  function removeItem(id) {
+    var idx = queue.findIndex(function (i) { return i.id === id; });
+    if (idx === -1) return;
+    queue[idx].el.remove();
+    queue.splice(idx, 1);
+    refresh();
+  }
+
+  function deleteAll() {
+    queue.filter(function (i) { return i.status !== 'imported'; })
+         .forEach(function (i) { i.el.remove(); });
+    queue = queue.filter(function (i) { return i.status === 'imported'; });
+    refresh();
+  }
+
+  function refresh() {
+    queueCard.style.display = queue.length ? '' : 'none';
+    fileCount.textContent = queue.length + ' fichier(s)';
+    var hasPending = queue.some(function (i) { return i.status === 'pending' || i.status === 'error'; });
+    btnAnalyzeAll.disabled = !hasPending;
+    btnAnalyzeAll.style.opacity = hasPending ? '1' : '0.4';
+    btnAnalyzeAll.style.cursor  = hasPending ? 'pointer' : 'not-allowed';
+  }
+
+  /* ── Row builder ────────────────────────────────────────────────────────── */
+  function buildRow(item) {
+    var kb  = Math.round(item.file.size / 1024);
+    var row = document.createElement('div');
+    row.className = 'rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700';
+    row.innerHTML =
+      '<div class="flex items-center gap-3 p-3">' +
+        '<div class="item-status-icon w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style="background:#f3f4f6">' +
+          '<i class="fas fa-file-pdf text-sm" style="color:#9ca3af"></i>' +
+        '</div>' +
+        '<div class="flex-1 min-w-0">' +
+          '<p class="text-sm font-medium truncate text-gray-900 dark:text-white">' + esc(item.file.name) + '</p>' +
+          '<p class="item-status-text text-xs mt-0.5 text-gray-500 dark:text-gray-300">' + kb + ' Ko — En attente</p>' +
+        '</div>' +
+        '<div class="flex items-center gap-1">' +
+          '<button class="btn-analyze w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-gray-400" title="Analyser et importer">' +
+            '<i class="fas fa-magnifying-glass text-xs"></i>' +
+          '</button>' +
+          '<button class="btn-del w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400" title="Supprimer">' +
+            '<i class="fas fa-trash-can text-xs"></i>' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="item-detail border-t border-gray-200 dark:border-slate-700 px-4 py-3" style="display:none"></div>';
+
+    var btnA = row.querySelector('.btn-analyze');
+    btnA.addEventListener('click', function () { analyzeOne(item); });
+    btnA.addEventListener('mouseenter', function () { btnA.style.color = '#2563eb'; btnA.style.background = 'rgba(37,99,235,0.08)'; });
+    btnA.addEventListener('mouseleave', function () { btnA.style.color = ''; btnA.style.background = ''; });
+
+    var btnD = row.querySelector('.btn-del');
+    btnD.addEventListener('click', function () { removeItem(item.id); });
+    btnD.addEventListener('mouseenter', function () { btnD.style.color = '#dc2626'; btnD.style.background = 'rgba(239,68,68,0.12)'; });
+    btnD.addEventListener('mouseleave', function () { btnD.style.color = ''; btnD.style.background = ''; });
+
+    return row;
+  }
+
+  /* ── Status ─────────────────────────────────────────────────────────────── */
+  var STATUS = {
+    pending:   { bg: '#f3f4f6', ic: '#9ca3af', cls: 'fas fa-file-pdf',        text: function (i) { return Math.round(i.file.size / 1024) + ' Ko — En attente'; } },
+    analyzing: { bg: '#dbeafe', ic: '#3b82f6', cls: 'fas fa-spinner fa-spin', text: function ()  { return 'Analyse en cours…'; } },
+    importing: { bg: '#e0e7ff', ic: '#6366f1', cls: 'fas fa-spinner fa-spin', text: function ()  { return 'Importation en cours…'; } },
+    imported:  { bg: '#d1fae5', ic: '#059669', cls: 'fas fa-check-double',    text: function (i) { return i._info || 'Importé'; } },
+    error:     { bg: '#fee2e2', ic: '#ef4444', cls: 'fas fa-xmark',           text: function ()  { return 'Importation échouée — non sauvegardé'; } },
+  };
+
+  function setStatus(item, status, detailHtml) {
+    item.status = status;
+    var cfg = STATUS[status];
+    item.el.querySelector('.item-status-icon').style.background = cfg.bg;
+    item.el.querySelector('.item-status-icon').innerHTML =
+      '<i class="' + cfg.cls + ' text-sm" style="color:' + cfg.ic + '"></i>';
+    item.el.querySelector('.item-status-text').textContent = cfg.text(item);
+    var btnA = item.el.querySelector('.btn-analyze');
+    var btnD = item.el.querySelector('.btn-del');
+    btnA.style.display = (status === 'pending' || status === 'error') ? '' : 'none';
+    btnD.style.display = (status === 'importing' || status === 'imported') ? 'none' : '';
+    var detail = item.el.querySelector('.item-detail');
+    if (detailHtml) { detail.innerHTML = detailHtml; detail.style.display = ''; }
+    else { detail.style.display = 'none'; detail.innerHTML = ''; }
+    refresh();
+  }
+
+  /* ── Analyze + Import ───────────────────────────────────────────────────── */
+  async function analyzeOne(item) {
+    if (item.status !== 'pending' && item.status !== 'error') return;
+    setStatus(item, 'analyzing');
+
+    var fd = new FormData();
+    fd.append('file', item.file);
+
+    var data;
+    try {
+      var r = await fetch('/upload/analyze', { method: 'POST', body: fd });
+      data  = await r.json();
+    } catch (e) {
+      setStatus(item, 'error', errHtml(e.message));
+      return;
+    }
+
+    if (!data.ok) {
+      setStatus(item, 'error', errHtml(data.error || 'Fichier non reconnu par aucun parseur disponible.'));
+      return;
+    }
+
+    setStatus(item, 'importing');
+    var params = new URLSearchParams({
+      transactions_json: data.transactions_json,
+      bank_id:           data.bank_id,
+      filename:          data.filename,
+      source_file:       data.source_file,
+      content_hash:      data.content_hash,
+    });
+
+    try {
+      var importRes  = await fetch('/upload/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+      var importData = await importRes.json();
+      if (importData.ok) {
+        anyImported = true;
+        removeItem(item.id);
+        addSummaryEntry(data, item.file.name);
+      } else {
+        setStatus(item, 'error', errHtml(importData.error || 'Erreur inconnue lors de la confirmation.'));
+      }
+    } catch (e) {
+      setStatus(item, 'error', errHtml(e.message));
+    }
+  }
+
+  function analyzeAll() {
+    var pending = queue.filter(function (i) { return i.status === 'pending' || i.status === 'error'; });
+    return Promise.all(pending.map(function (i) { return analyzeOne(i); }));
+  }
+
+  function errHtml(msg) {
+    var lines = String(msg)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/\n/g,'<br>');
+    return '<div style="background:#fee2e2;border-left:4px solid #dc2626;border-radius:8px;padding:0.75rem 1rem;margin-top:4px">' +
+             '<p style="font-weight:700;color:#991b1b;margin:0 0 0.35rem">' +
+               '<i class="fas fa-circle-xmark" style="margin-right:0.4rem"></i>Erreur — importation annulée' +
+             '</p>' +
+             '<p style="font-size:0.875rem;color:#7f1d1d;margin:0 0 0.35rem;line-height:1.55">' + lines + '</p>' +
+             '<p style="font-size:0.8rem;color:#b91c1c;margin:0">' +
+               '<i class="fas fa-shield-halved" style="margin-right:0.3rem"></i>' +
+               'Le fichier n\'a pas été sauvegardé (base de données ni disque).' +
+             '</p>' +
+           '</div>';
+  }
+
+  function addSummaryEntry(data, originalName) {
+    var summary = document.getElementById('im-import-summary');
+    var list    = document.getElementById('im-summary-list');
+    var broken  = data.broken_count > 0
+      ? ' <span style="color:#d97706">(' + data.broken_count + ' incomplète(s))</span>' : '';
+    var entry = document.createElement('div');
+    entry.className = 'flex items-start gap-2 text-sm';
+    entry.innerHTML =
+      '<i class="fas fa-file-pdf text-red-400 mt-0.5 flex-shrink-0"></i>' +
+      '<span class="text-gray-700 dark:text-gray-300">' +
+        esc(originalName) + ' — ' +
+        '<span style="color:#16a34a;font-weight:600">' + data.tx_count + ' transaction(s)</span>' +
+        broken +
+      '</span>';
+    list.appendChild(entry);
+    summary.style.display = '';
+  }
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 })();
 </script>

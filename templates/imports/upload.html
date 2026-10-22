@@ -190,7 +190,7 @@
     analyzing: { bg: '#dbeafe', ic: '#3b82f6', cls: 'fas fa-spinner fa-spin', text: function ()  { return 'Analyse en cours…'; } },
     importing: { bg: '#e0e7ff', ic: '#6366f1', cls: 'fas fa-spinner fa-spin', text: function ()  { return 'Importation en cours…'; } },
     imported:  { bg: '#d1fae5', ic: '#059669', cls: 'fas fa-check-double',    text: function (i) { return i._info || 'Importé'; } },
-    error:     { bg: '#fee2e2', ic: '#ef4444', cls: 'fas fa-xmark',           text: function ()  { return 'Erreur'; } },
+    error:     { bg: '#fee2e2', ic: '#ef4444', cls: 'fas fa-xmark',           text: function ()  { return 'Importation échouée — non sauvegardé'; } },
   };
 
   function setStatus(item, status, detailHtml) {
@@ -238,12 +238,7 @@
     }
 
     if (!data.ok) {
-      setStatus(item, 'error', errHtml(data.error || 'Fichier non reconnu par aucun parseur'));
-      return;
-    }
-
-    if (data.already_imported_at) {
-      setStatus(item, 'error', errHtml('Ce fichier a déjà été importé le ' + data.already_imported_at));
+      setStatus(item, 'error', errHtml(data.error || 'Fichier non reconnu par aucun parseur disponible.'));
       return;
     }
 
@@ -263,11 +258,12 @@
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),
       });
-      if (importRes.ok) {
+      var importData = await importRes.json();
+      if (importData.ok) {
         removeItem(item.id);
         addSummaryEntry(data, item.file.name);
       } else {
-        setStatus(item, 'error', errHtml("Erreur lors de l'importation (statut " + importRes.status + ')'));
+        setStatus(item, 'error', errHtml(importData.error || 'Erreur inconnue lors de la confirmation de l\'importation.'));
       }
     } catch (e) {
       setStatus(item, 'error', errHtml(e.message));
@@ -280,8 +276,19 @@
   }
 
   function errHtml(msg) {
-    return '<p style="font-size:0.75rem; color:#dc2626">' +
-           '<i class="fas fa-circle-xmark" style="margin-right:0.3rem"></i>' + esc(msg) + '</p>';
+    var lines = esc(msg).replace(/\n/g, '<br>');
+    return '<div style="background:#fee2e2;border-left:4px solid #dc2626;border-radius:8px;padding:0.75rem 1rem;margin-top:4px">' +
+             '<p style="font-weight:700;color:#991b1b;margin:0 0 0.35rem">' +
+               '<i class="fas fa-circle-xmark" style="margin-right:0.4rem"></i>Erreur — importation annulée' +
+             '</p>' +
+             '<p style="font-size:0.875rem;color:#7f1d1d;margin:0 0 0.35rem;white-space:pre-wrap;line-height:1.55">' +
+               lines +
+             '</p>' +
+             '<p style="font-size:0.8rem;color:#b91c1c;margin:0">' +
+               '<i class="fas fa-shield-halved" style="margin-right:0.3rem"></i>' +
+               'Le fichier n\'a pas été sauvegardé (ni dans la base de données, ni sur le disque).' +
+             '</p>' +
+           '</div>';
   }
 
   function addSummaryEntry(data, originalName) {

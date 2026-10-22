@@ -4,6 +4,7 @@ pub mod lopdf_text;
 
 use crate::models::ParsedTransaction;
 use anyhow::Result;
+use regex::Regex;
 
 pub trait BankParser: Send + Sync {
     fn bank_id(&self) -> i64;
@@ -22,6 +23,82 @@ pub trait BankParser: Send + Sync {
     fn detect_positioned(&self, _items: &[lopdf_text::TextItem]) -> Option<bool> {
         None
     }
+    /// Extract (opening_balance, closing_balance) from the statement text.
+    /// Returns None if the lines cannot be found — validation is skipped in that case.
+    fn extract_balances(&self, text: &str) -> Option<(f64, f64)> {
+        extract_statement_balances(text)
+    }
+}
+
+/// Shared balance extractor — works for both BNP Paribas and Crédit Mutuel.
+/// Finds lines like:
+///   "SOLDE CREDITEUR AU 26.12.2025       3 930,65"
+///   "SOLDE CREDITEUR AU 30/04/2026       11.171,17"
+///   "Réf : 005 SOLDE CREDITEUR AU 01/06/2026       16.368,49"
+/// Returns the first balance as the opening balance and the last as the closing balance.
+pub fn extract_statement_balances(text: &str) -> Option<(f64, f64)> {
+    let re = Regex::new(
+        r"(?i)SOLDE\s+(CR[EÉ]DITEUR|D[EÉ]BITEUR)\s+AU\s+[\d./]+\s+([\d\s.\x{00A0}]+,\d{2})",
+    )
+    .ok()?;
+
+    let mut balances: Vec<f64> = Vec::new();
+    for cap in re.captures_iter(text) {
+        let is_debit = cap[1].to_uppercase().contains("DEBITEUR");
+        if let Some(amount) = parse_european_amount(cap[2].trim()) {
+            balances.push(if is_debit { -amount } else { amount });
+        }
+    }
+
+    if balances.len() >= 2 {
+        tracing::debug!(
+            opening = %balances[0],
+            closing = %balances.last().unwrap(),
+            "Balance lines found"
+        );
+        Some((balances[0], *balances.last().unwrap()))
+    } else {
+        tracing::debug!(found = balances.len(), "Not enough balance lines for validation");
+        None
+    }
+}
+
+/// Validate that the sum of parsed transaction amounts matches the
+/// difference between the closing and opening balances.
+/// Returns Err if validation fails; Ok if it passes or balances are not found.
+fn validate_balance(
+    bank: &str,
+    transactions: &[ParsedTransaction],
+    start_bal: f64,
+    end_bal: f64,
+) -> Result<()> {
+    let tx_sum: f64 = transactions.iter().map(|t| t.amount).sum();
+    let expected = end_bal - start_bal;
+    let error = (tx_sum - expected).abs();
+
+    tracing::info!(
+        bank        = %bank,
+        start_bal   = %start_bal,
+        end_bal     = %end_bal,
+        tx_sum      = %tx_sum,
+        expected    = %expected,
+        error       = %error,
+        "Balance validation"
+    );
+
+    if error > 0.005 {
+        anyhow::bail!(
+            "Validation du solde échouée :\n\
+             • Somme des transactions analysées : {:.2} €\n\
+             • Variation de solde attendue (solde final − solde initial) : {:.2} €\n\
+             • Écart : {:.2} €\n\n\
+             Le fichier n'a pas été sauvegardé. Vérifiez que le relevé est complet et non tronqué.",
+            tx_sum,
+            expected,
+            error
+        );
+    }
+    Ok(())
 }
 
 pub fn all_parsers() -> Vec<Box<dyn BankParser>> {
@@ -43,6 +120,9 @@ pub fn detect_and_parse(text: &str) -> Result<(i64, String, Vec<ParsedTransactio
                 transactions = %transactions.len(),
                 "Parsing complete"
             );
+            if let Some((start_bal, end_bal)) = parser.extract_balances(text) {
+                validate_balance(parser.bank_name(), &transactions, start_bal, end_bal)?;
+            }
             return Ok((parser.bank_id(), parser.bank_name().to_string(), transactions));
         }
     }
@@ -72,11 +152,18 @@ pub fn detect_and_parse_positioned(
                     transactions = %transactions.len(),
                     "Positioned parse complete"
                 );
+                let text_for_validation = lopdf_text::items_to_text(items, 5.0);
+                if let Some((start_bal, end_bal)) = parser.extract_balances(&text_for_validation) {
+                    validate_balance(parser.bank_name(), &transactions, start_bal, end_bal)?;
+                }
                 return Ok((parser.bank_id(), parser.bank_name().to_string(), transactions));
             }
             // Parser detected but has no positioned implementation — fall back to text
             let text = lopdf_text::items_to_text(items, 5.0);
             let transactions = parser.parse(&text)?;
+            if let Some((start_bal, end_bal)) = parser.extract_balances(&text) {
+                validate_balance(parser.bank_name(), &transactions, start_bal, end_bal)?;
+            }
             return Ok((parser.bank_id(), parser.bank_name().to_string(), transactions));
         }
     }

@@ -1,7 +1,7 @@
 use axum::{
     extract::{Multipart, Path, Query, State},
     http::HeaderMap,
-    response::{Html, IntoResponse, Json, Redirect},
+    response::{Html, IntoResponse, Json},
     Form,
 };
 use axum_extra::extract::CookieJar;
@@ -16,7 +16,7 @@ use crate::{
     parsers::{detect_and_parse, detect_and_parse_positioned, lopdf_text},
     AppState,
 };
-use super::{base_context, is_htmx, htmx_redirect};
+use super::base_context;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 struct ImportedFileView {
@@ -168,7 +168,19 @@ pub async fn post_confirm_import(
     jar: CookieJar,
     headers: HeaderMap,
     Form(form): Form<ConfirmImportForm>,
-) -> AppResult<impl IntoResponse> {
+) -> impl IntoResponse {
+    match confirm_import_inner(state, jar, headers, form).await {
+        Ok(resp) => resp,
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
+    }
+}
+
+async fn confirm_import_inner(
+    state: AppState,
+    jar: CookieJar,
+    _headers: HeaderMap,
+    form: ConfirmImportForm,
+) -> AppResult<axum::response::Response> {
     let user_id = super::get_user_id(&jar)?;
 
     // Server-side bank check (mirrors analyze_inner; prevents direct API bypass).
@@ -253,11 +265,8 @@ pub async fn post_confirm_import(
         "Import confirmed and saved"
     );
 
-    if is_htmx(&headers) {
-        Ok(htmx_redirect("/incomplete-transactions").into_response())
-    } else {
-        Ok(Redirect::to("/incomplete-transactions").into_response())
-    }
+    Ok(Json(serde_json::json!({ "ok": true, "file_id": file_id, "tx_count": transactions.len() }))
+        .into_response())
 }
 
 pub async fn post_analyze(
@@ -322,16 +331,7 @@ async fn analyze_inner(
         }
     }
 
-    // Save file to storage only after successful parse and bank check
-    let storage_root = PathBuf::from(&state.config.storage_path);
-    let statements_dir = storage_root.join("Statements").join(&bank_name);
-    tokio::fs::create_dir_all(&statements_dir).await?;
-
-    let safe_name = sanitize_filename(&original_name);
-    let dest_path = statements_dir.join(&safe_name);
-    tokio::fs::write(&dest_path, &bytes).await?;
-
-    let relative_path = format!("Statements/{}/{}", bank_name, safe_name);
+    // Compute hash and check for duplicates BEFORE writing to storage.
     let content_hash = format!("{:x}", Sha256::digest(&bytes));
 
     let already_imported_at: Option<String> = sqlx::query_scalar(
@@ -342,6 +342,32 @@ async fn analyze_inner(
     .await
     .ok()
     .flatten();
+
+    if let Some(ref imported_at) = already_imported_at {
+        tracing::warn!(
+            filename    = %original_name,
+            imported_at = %imported_at,
+            "Rejected: duplicate content hash"
+        );
+        return Ok(Json(serde_json::json!({
+            "ok": false,
+            "error": format!(
+                "Ce fichier a déjà été importé le {}. Supprimez l'import existant avant de réimporter.",
+                imported_at
+            )
+        })).into_response());
+    }
+
+    // Save file to storage only after successful parse, bank check, and duplicate check.
+    let storage_root = PathBuf::from(&state.config.storage_path);
+    let statements_dir = storage_root.join("Statements").join(&bank_name);
+    tokio::fs::create_dir_all(&statements_dir).await?;
+
+    let safe_name = sanitize_filename(&original_name);
+    let dest_path = statements_dir.join(&safe_name);
+    tokio::fs::write(&dest_path, &bytes).await?;
+
+    let relative_path = format!("Statements/{}/{}", bank_name, safe_name);
 
     let broken_count = transactions.iter().filter(|t| t.parse_note.is_some()).count();
     let tx_count = transactions.len();
@@ -367,7 +393,6 @@ async fn analyze_inner(
         "filename": safe_name,
         "source_file": relative_path,
         "content_hash": content_hash,
-        "already_imported_at": already_imported_at,
     })).into_response())
 }
 

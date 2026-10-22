@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use crate::{
     error::{AppError, AppResult},
-    models::{Category, Currency, TransactionView},
+    models::{Bank, Category, Currency, TransactionView},
     AppState,
 };
 use super::{base_context, get_user_id, is_htmx, htmx_redirect};
@@ -46,16 +46,22 @@ pub async fn get_transactions(
     let currencies = sqlx::query_as::<_, Currency>("SELECT * FROM currencies ORDER BY name")
         .fetch_all(&state.db)
         .await?;
+    let banks = sqlx::query_as::<_, Bank>("SELECT * FROM banks ORDER BY name")
+        .fetch_all(&state.db)
+        .await?;
     let current_user_id = super::get_user_id(&jar)?;
 
-    // Pending/broken transactions for the "complete" carousel (user's own only)
+    // Pending/broken transactions for the carousel — current user's own first,
+    // fall back to all pending if the user has none (e.g. imported under a different user id).
     let pending_filter = TransactionFilter::default();
     let all_pending = fetch_transaction_views(&state.db, true, &pending_filter).await?;
-    let user_pending: Vec<&crate::models::TransactionView> = all_pending
+    let user_pending: Vec<crate::models::TransactionView> = all_pending
         .iter()
         .filter(|t| t.paid_by_id == current_user_id)
+        .cloned()
         .collect();
-    let pending_json = serde_json::to_string(&user_pending)
+    let carousel_items = if !user_pending.is_empty() { &user_pending } else { &all_pending };
+    let pending_json = serde_json::to_string(carousel_items)
         .unwrap_or_else(|_| "[]".to_string());
 
     let default_currency_id: i64 = crate::db::get_setting(&state.db, "default_currency_id")
@@ -67,11 +73,12 @@ pub async fn get_transactions(
     ctx.insert("transactions", &transactions);
     ctx.insert("categories", &categories);
     ctx.insert("currencies", &currencies);
+    ctx.insert("banks", &banks);
     ctx.insert("current_user_id", &current_user_id);
     ctx.insert("filter", &filter.search);
     ctx.insert("filter_category", &filter.category_id);
     ctx.insert("pending_json", &pending_json);
-    ctx.insert("pending_count", &user_pending.len());
+    ctx.insert("pending_count", &carousel_items.len());
     ctx.insert("default_currency_id", &default_currency_id);
 
     let html = state.tera.render("transactions/list.html", &ctx)?;
