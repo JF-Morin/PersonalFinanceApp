@@ -36,6 +36,9 @@
 backup/
 backups/
 
+# ── Local documentation ───────────────────────────────────────────────────────
+deployment-instructions.md
+
 # ── OS / editor ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
