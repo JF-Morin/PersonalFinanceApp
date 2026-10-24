@@ -21,6 +21,18 @@
 # Drop real bank statement PDFs here to iterate on parsers.
 /test/
 
+# ── Sensitive file types (wherever they land) ─────────────────────────────────
+*.pdf           # Bank statements — may contain real financial data
+*.db            # SQLite databases outside /data/
+*.sqlite
+*.sqlite3
+*.pem           # TLS certificates / private keys
+*.key
+*.p12
+*.pfx
+backup/
+backups/
+
 # ── OS / editor ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
