@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Installed to .git/hooks/pre-commit by scripts/install-hooks.sh
+ROOT="$(git rev-parse --show-toplevel)"
+exec "$ROOT/scripts/check-confidential.sh" --staged

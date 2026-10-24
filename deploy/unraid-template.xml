@@ -1,0 +1,154 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>PersonalFinanceApp</Name>
+  <Repository>ghcr.io/jf-morin/personalfinanceapp:latest</Repository>
+  <Registry>https://github.com/JF-Morin/PersonalFinanceApp/pkgs/container/personalfinanceapp</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/JF-Morin/PersonalFinanceApp</Support>
+  <Project>https://github.com/JF-Morin/PersonalFinanceApp</Project>
+  <Overview>Personal finance tracker — import bank PDF statements, categorise transactions, track shared expenses.</Overview>
+  <Category>Finance:</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/JF-Morin/PersonalFinanceApp/main/deploy/unraid-template.xml</TemplateURL>
+  <Description>Personal finance app built with Rust/Axum. Import PDF bank statements, categorise transactions and track shared expenses between users.</Description>
+
+  <!-- ── Ports ───────────────────────────────────────────────────────────── -->
+  <Config
+    Name="Web UI Port"
+    Target="3000"
+    Default="3000"
+    Mode="tcp"
+    Description="Host port mapped to the app. Change if 3000 is already in use."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">3000</Config>
+
+  <!-- ── Security ───────────────────────────────────────────────────────── -->
+  <Config
+    Name="Cookie Secret"
+    Target="COOKIE_SECRET"
+    Default=""
+    Mode=""
+    Description="REQUIRED — Random 32+ character string used to sign session cookies. Generate one with: openssl rand -base64 32"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"></Config>
+
+  <!-- ── Volumes ────────────────────────────────────────────────────────── -->
+  <Config
+    Name="Database folder"
+    Target="/app/data"
+    Default="/mnt/user/appdata/PersonalFinanceApp/data"
+    Mode="rw"
+    Description="Where the SQLite database is stored. Keep this in appdata for safety."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/PersonalFinanceApp/data</Config>
+
+  <Config
+    Name="PDF Storage folder"
+    Target="/app/storage"
+    Default="/mnt/user/appdata/PersonalFinanceApp/storage"
+    Mode="rw"
+    Description="Where uploaded PDF bank statements are stored. Can point at an SMB share (e.g. /mnt/user/PersonalFinanceApp)."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/PersonalFinanceApp/storage</Config>
+
+  <Config
+    Name="Logs folder"
+    Target="/app/logs"
+    Default="/mnt/user/appdata/PersonalFinanceApp/logs"
+    Mode="rw"
+    Description="Rolling daily log files (app.log.YYYY-MM-DD)."
+    Type="Path"
+    Display="advanced"
+    Required="false"
+    Mask="false">/mnt/user/appdata/PersonalFinanceApp/logs</Config>
+
+  <Config
+    Name="Templates folder"
+    Target="/app/templates"
+    Default="/mnt/user/appdata/PersonalFinanceApp/templates"
+    Mode="rw"
+    Description="Mount to enable live template edits without rebuilding the image."
+    Type="Path"
+    Display="advanced"
+    Required="false"
+    Mask="false">/mnt/user/appdata/PersonalFinanceApp/templates</Config>
+
+  <!-- ── Internal paths (rarely need changing) ──────────────────────────── -->
+  <Config
+    Name="DATABASE_URL"
+    Target="DATABASE_URL"
+    Default="sqlite:/app/data/finance.db"
+    Mode=""
+    Description="SQLite connection string. Only change if you moved the data folder to a non-default path inside the container."
+    Type="Variable"
+    Display="advanced"
+    Required="true"
+    Mask="false">sqlite:/app/data/finance.db</Config>
+
+  <Config
+    Name="STORAGE_PATH"
+    Target="STORAGE_PATH"
+    Default="/app/storage"
+    Mode=""
+    Description="Internal path for PDF storage. Must match the container side of the PDF Storage volume above."
+    Type="Variable"
+    Display="advanced"
+    Required="true"
+    Mask="false">/app/storage</Config>
+
+  <Config
+    Name="LOG_PATH"
+    Target="LOG_PATH"
+    Default="/app/logs"
+    Mode=""
+    Description="Internal path for log files."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">/app/logs</Config>
+
+  <Config
+    Name="SERVER_HOST"
+    Target="SERVER_HOST"
+    Default="0.0.0.0"
+    Mode=""
+    Description="Interface the app binds to. 0.0.0.0 means all interfaces (required for Docker port mapping)."
+    Type="Variable"
+    Display="advanced"
+    Required="true"
+    Mask="false">0.0.0.0</Config>
+
+  <Config
+    Name="SERVER_PORT"
+    Target="SERVER_PORT"
+    Default="3000"
+    Mode=""
+    Description="Port the app listens on inside the container. Must match the container side of Web UI Port above."
+    Type="Variable"
+    Display="advanced"
+    Required="true"
+    Mask="false">3000</Config>
+
+  <!-- ── Logging ────────────────────────────────────────────────────────── -->
+  <Config
+    Name="Log verbosity (RUST_LOG)"
+    Target="RUST_LOG"
+    Default="personal_finance_app=info,tower_http=info"
+    Mode=""
+    Description="Tracing filter. Use =debug for verbose output, =warn for quiet. Example: personal_finance_app=debug,tower_http=info"
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">personal_finance_app=info,tower_http=info</Config>
+
+</Container>

@@ -25,9 +25,11 @@ WORKDIR /app
 COPY --from=builder /app/target/release/personal-finance-app .
 COPY templates ./templates
 COPY static    ./static
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
 # Directories are mounted as volumes at runtime
-RUN mkdir -p /app/data /app/storage/Statements /app/storage/Images /app/logs
+RUN mkdir -p /app/data /app/storage/Statements /app/storage/Images /app/logs \
+ && chmod +x ./docker-entrypoint.sh
 
 EXPOSE 3000
 
@@ -38,4 +40,4 @@ ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=3000
 ENV RUST_LOG=personal_finance_app=debug,tower_http=info
 
-CMD ["./personal-finance-app"]
+ENTRYPOINT ["./docker-entrypoint.sh"]

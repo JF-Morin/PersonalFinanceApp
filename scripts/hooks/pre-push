@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Installed to .git/hooks/pre-push by scripts/install-hooks.sh
+# Runs on every `git push`: checks that no sensitive files are included.
+# Database backup happens on the server side via docker-entrypoint.sh.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+# Collect all files in commits being pushed
+FILES=()
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # All-zeros SHA means the branch is being deleted — nothing to check
+    [[ "$local_sha" == "0000000000000000000000000000000000000000" ]] && continue
+
+    if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
+        # New branch: check all commits reachable from local_sha
+        mapfile -t BATCH < <(git log --name-only --format="" "$local_sha" | grep -v "^$")
+    else
+        mapfile -t BATCH < <(git diff --name-only "$remote_sha".."$local_sha")
+    fi
+    FILES+=("${BATCH[@]}")
+done
+
+if [ "${#FILES[@]}" -eq 0 ]; then
+    echo "Pre-push: nothing to check."
+    exit 0
+fi
+
+# De-duplicate
+mapfile -t UNIQUE_FILES < <(printf '%s\n' "${FILES[@]}" | sort -u)
+
+"$ROOT/scripts/check-confidential.sh" --push "${UNIQUE_FILES[@]}"
