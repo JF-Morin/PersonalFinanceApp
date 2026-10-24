@@ -19,9 +19,7 @@
 
 # ── Test PDFs ─────────────────────────────────────────────────────────────────
 # Drop real bank statement PDFs here to iterate on parsers.
-# The directory itself is tracked (via .gitkeep); its contents are not.
-/test/*
-!/test/.gitkeep
+/test/
 
 # ── OS / editor ───────────────────────────────────────────────────────────────
 .DS_Store
