@@ -13,9 +13,12 @@
 .claude/settings.local.json
 
 # ── Runtime data (created automatically at startup) ───────────────────────────
-/data/          # SQLite database
-/logs/          # Rolling log files
-/storage/       # Ingested PDF statements (may contain real bank data)
+# SQLite database
+/data/
+# Rolling log files
+/logs/
+# Ingested PDF statements (may contain real bank data)
+/storage/
 
 # ── Test PDFs ─────────────────────────────────────────────────────────────────
 # Drop real bank statement PDFs here to iterate on parsers.
