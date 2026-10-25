@@ -73,17 +73,6 @@
     Required="false"
     Mask="false">/mnt/user/appdata/PersonalFinanceApp/logs</Config>
 
-  <Config
-    Name="Templates folder"
-    Target="/app/templates"
-    Default="/mnt/user/appdata/PersonalFinanceApp/templates"
-    Mode="rw"
-    Description="Mount to enable live template edits without rebuilding the image."
-    Type="Path"
-    Display="advanced"
-    Required="false"
-    Mask="false">/mnt/user/appdata/PersonalFinanceApp/templates</Config>
-
   <!-- ── Internal paths (rarely need changing) ──────────────────────────── -->
   <Config
     Name="DATABASE_URL"
