@@ -7,6 +7,7 @@ pub struct User {
     pub last_name: Option<String>,
     pub bank_id: Option<i64>,
     pub password_hash: Option<String>,
+    pub last_login: Option<String>,
 }
 
 impl User {
@@ -30,6 +31,7 @@ pub struct Currency {
     pub id: i64,
     pub name: String,
     pub symbol: String,
+    pub code: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
@@ -84,7 +86,7 @@ pub struct ParsedTransaction {
 }
 
 /// Enriched transaction for display (joins bank/category/user names).
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct TransactionView {
     pub id: i64,
     pub date: String,
@@ -102,20 +104,27 @@ pub struct TransactionView {
     pub notes: Option<String>,
     pub from_file_id: i64,
     pub parse_note: Option<String>,
+    pub foreign_currency_amount: Option<f64>,
+    pub foreign_currency_id: Option<i64>,
+    pub foreign_currency_symbol: Option<String>,
 }
 
 /// Per-user breakdown and net balance for a user pair + currency.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserPairBalance {
     pub user1_name: String,
-    pub user1_paid_total: f64,       // sum of |amount| for all their transactions
-    pub user1_paid_for_self: f64,    // amount they kept for themselves
-    pub user1_paid_for_other: f64,   // amount they covered for the other
+    pub user1_total_debit: f64,       // sum of negative amounts (stored negative)
+    pub user1_total_credit: f64,      // sum of positive amounts
+    pub user1_debit_for_other: f64,   // sum of (negative_amount * share) — negative
+    pub user1_credit_for_other: f64,  // sum of (positive_amount * share) — positive
+    pub user1_total_for_other: f64,   // debit_for_other + credit_for_other (signed net)
 
     pub user2_name: String,
-    pub user2_paid_total: f64,
-    pub user2_paid_for_self: f64,
-    pub user2_paid_for_other: f64,
+    pub user2_total_debit: f64,
+    pub user2_total_credit: f64,
+    pub user2_debit_for_other: f64,
+    pub user2_credit_for_other: f64,
+    pub user2_total_for_other: f64,
 
     /// Who owes money (empty if balanced).
     pub debtor: String,

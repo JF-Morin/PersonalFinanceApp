@@ -19,6 +19,7 @@ use super::{is_htmx, htmx_redirect};
 pub struct SettingsQuery {
     pub pw_changed: Option<String>,
     pub pw_error: Option<String>,
+    pub user_error: Option<String>,
 }
 
 pub async fn get_settings(
@@ -26,17 +27,7 @@ pub async fn get_settings(
     jar: CookieJar,
     Query(query): Query<SettingsQuery>,
 ) -> AppResult<Html<String>> {
-    let theme = get_setting(&state.db, "theme")
-        .await
-        .unwrap_or_else(|_| "light".to_string());
-
-    let mut ctx = tera::Context::new();
-    ctx.insert("theme", &theme);
-    ctx.insert("is_dark", &(theme == "dark"));
-
-    if let Ok(user) = super::get_current_user(&jar, &state.db).await {
-        ctx.insert("current_user", &user);
-    }
+    let mut ctx = super::base_context(&jar, &state.db).await?;
 
     let currencies = sqlx::query_as::<_, Currency>("SELECT * FROM currencies ORDER BY name")
         .fetch_all(&state.db)
@@ -60,6 +51,7 @@ pub async fn get_settings(
     ctx.insert("default_currency_id", &default_currency_id);
     ctx.insert("pw_changed", &query.pw_changed.is_some());
     ctx.insert("pw_error", &query.pw_error.as_deref().unwrap_or(""));
+    ctx.insert("user_error", &query.user_error.as_deref().unwrap_or(""));
 
     let html = state.tera.render("settings.html", &ctx)?;
     Ok(Html(html))
@@ -73,10 +65,11 @@ pub struct SettingsForm {
 
 pub async fn post_settings(
     State(state): State<AppState>,
-    _jar: CookieJar,
+    jar: CookieJar,
     headers: HeaderMap,
     Form(form): Form<SettingsForm>,
 ) -> AppResult<impl IntoResponse> {
+    super::get_user_id(&jar)?;
     let theme = if form.theme == "dark" { "dark" } else { "light" };
     set_setting(&state.db, "theme", theme).await?;
     set_setting(&state.db, "default_currency_id", &form.default_currency_id).await?;
@@ -156,6 +149,21 @@ pub async fn post_new_user(
     _jar: CookieJar,
     Form(form): Form<NewUserForm>,
 ) -> AppResult<impl IntoResponse> {
+    let duplicate: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM users WHERE LOWER(name) = LOWER(?)"
+    )
+    .bind(&form.name)
+    .fetch_optional(&state.db)
+    .await?;
+
+    if duplicate.is_some() {
+        let redirect = match form.redirect_to.as_deref() {
+            Some("/login") => "/login?user_error=duplicate",
+            _ => "/settings?user_error=duplicate",
+        };
+        return Ok(Redirect::to(redirect).into_response());
+    }
+
     let password_hash = match form.password.as_deref() {
         Some(pw) if !pw.is_empty() => {
             let salt = SaltString::generate(&mut OsRng);
@@ -180,7 +188,7 @@ pub async fn post_new_user(
         Some("/login") => "/login",
         _ => "/settings",
     };
-    Ok(Redirect::to(redirect))
+    Ok(Redirect::to(redirect).into_response())
 }
 
 #[derive(Deserialize)]
@@ -195,9 +203,11 @@ pub struct EditUserForm {
 
 pub async fn post_edit_user(
     State(state): State<AppState>,
+    jar: CookieJar,
     Path(id): Path<i64>,
     Form(form): Form<EditUserForm>,
 ) -> AppResult<impl IntoResponse> {
+    super::get_user_id(&jar)?;
     let last_name = form.last_name.as_deref().filter(|s| !s.is_empty());
     sqlx::query("UPDATE users SET name = ?, last_name = ?, bank_id = ? WHERE id = ?")
         .bind(&form.name)

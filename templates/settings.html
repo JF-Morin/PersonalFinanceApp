@@ -26,7 +26,7 @@
   get canSave() { return this.pwValid && (this.profileChanged || this.pwFull); }
 }">
 
-<div class="max-w-3xl mx-auto">
+<div class="max-w-5xl mx-auto">
 
 <div class="mb-6">
   <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Paramètres</h1>
@@ -97,6 +97,15 @@
   </div>
   {% endif %}
 
+  {% if user_error == "duplicate" %}
+  <div class="flex items-center gap-3 bg-red-50 dark:bg-red-900/30
+              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
+              text-red-700 dark:text-red-300 text-sm">
+    <i class="fas fa-circle-xmark flex-shrink-0"></i>
+    Un utilisateur avec ce prénom existe déjà.
+  </div>
+  {% endif %}
+
   <!-- Users -->
   <div class="card">
     <h2 class="text-base font-semibold mb-5 flex items-center gap-2 text-gray-900 dark:text-gray-100">
@@ -112,6 +121,7 @@
             <th class="table-header">Nom</th>
             <th class="table-header">Banque</th>
             <th class="table-header">MDP</th>
+            <th class="table-header">Dernière connexion</th>
             <th class="table-header w-36"></th>
           </tr>
         </thead>
@@ -132,6 +142,13 @@
               </span>
               {% else %}
               <span class="text-xs text-gray-400 dark:text-gray-500">Aucun</span>
+              {% endif %}
+            </td>
+            <td class="table-cell text-gray-500 dark:text-gray-400 text-sm whitespace-nowrap">
+              {% if u.last_login %}
+                <i class="fas fa-clock text-xs mr-1"></i>{{ u.last_login | truncate(length=16, end="") }}
+              {% else %}
+                <span class="text-gray-400 dark:text-gray-600">—</span>
               {% endif %}
             </td>
             <td class="table-cell">

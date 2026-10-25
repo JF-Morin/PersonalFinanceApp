@@ -7,8 +7,11 @@ use super::base_context;
 
 // ── Shared computation helpers ──────────────────────────────────────────────
 
+fn round2(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
+}
+
 async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
-    // Fetch all complete transactions that involve sharing (other_share set)
     let rows: Vec<(i64, f64, Option<f64>, i64)> = sqlx::query_as(
         r#"
         SELECT t.paid_by, t.amount, t.other_share, t.currency_id
@@ -32,61 +35,74 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
     let user_names: HashMap<i64, String> =
         all_users.iter().map(|u| (u.id, u.display_name())).collect();
 
-    // For each (user_a, user_b, currency) pair where a < b, accumulate:
-    //   paid_for_self[uid][cid]  = amount the user kept for themselves
-    //   paid_for_other[uid][cid] = amount the user covered for the other
-    //   paid_total[uid][cid]     = |amount| total
-    let mut paid_for_self:  HashMap<(i64, i64), f64> = HashMap::new();
-    let mut paid_for_other: HashMap<(i64, i64), f64> = HashMap::new();
-    let mut paid_total:     HashMap<(i64, i64), f64> = HashMap::new();
+    // Accumulate signed per-user per-currency values.
+    // debit = negative amounts, credit = positive amounts.
+    let mut total_debit:      HashMap<(i64, i64), f64> = HashMap::new();
+    let mut total_credit:     HashMap<(i64, i64), f64> = HashMap::new();
+    let mut debit_for_other:  HashMap<(i64, i64), f64> = HashMap::new();
+    let mut credit_for_other: HashMap<(i64, i64), f64> = HashMap::new();
 
     for (paid_by, amount, other_share, currency_id) in &rows {
-        let abs_amount = amount.abs();
-        let other_frac  = other_share.unwrap_or(0.0) / 100.0;
-        let self_frac   = 1.0 - other_frac;
-
-        let for_other = abs_amount * other_frac;
-        let for_self  = abs_amount * self_frac;
-
-        *paid_for_other.entry((*paid_by, *currency_id)).or_insert(0.0) += for_other;
-        *paid_for_self .entry((*paid_by, *currency_id)).or_insert(0.0) += for_self;
-        *paid_total    .entry((*paid_by, *currency_id)).or_insert(0.0) += abs_amount;
+        let share = other_share.unwrap_or(0.0) / 100.0;
+        if *amount < 0.0 {
+            *total_debit    .entry((*paid_by, *currency_id)).or_insert(0.0) += amount;
+            *debit_for_other.entry((*paid_by, *currency_id)).or_insert(0.0) += amount * share;
+        } else {
+            *total_credit    .entry((*paid_by, *currency_id)).or_insert(0.0) += amount;
+            *credit_for_other.entry((*paid_by, *currency_id)).or_insert(0.0) += amount * share;
+        }
     }
 
     let user_ids: Vec<i64> = all_users.iter().map(|u| u.id).collect();
     let mut result: Vec<UserPairBalance> = Vec::new();
 
-    // Single-user DB: no second user exists yet — show balance against a placeholder.
+    // Single-user DB: show balance against a placeholder.
     if user_ids.len() == 1 {
         let uid1 = user_ids[0];
         let uname1 = user_names.get(&uid1).cloned().unwrap_or_default();
         let placeholder = "Autre personne".to_string();
 
-        let cids: std::collections::HashSet<i64> = paid_total.keys()
+        let cids: std::collections::HashSet<i64> = total_debit.keys()
+            .chain(total_credit.keys())
             .filter(|&&(uid, _)| uid == uid1)
             .map(|&(_, cid)| cid)
             .collect();
 
         for cid in cids {
-            let u1_total     = paid_total    .get(&(uid1, cid)).copied().unwrap_or(0.0);
-            let u1_for_self  = paid_for_self .get(&(uid1, cid)).copied().unwrap_or(0.0);
-            let u1_for_other = paid_for_other.get(&(uid1, cid)).copied().unwrap_or(0.0);
-            if u1_total < 0.005 { continue; }
+            let u1_td  = total_debit    .get(&(uid1, cid)).copied().unwrap_or(0.0);
+            let u1_tc  = total_credit   .get(&(uid1, cid)).copied().unwrap_or(0.0);
+            let u1_dfo = debit_for_other .get(&(uid1, cid)).copied().unwrap_or(0.0);
+            let u1_cfo = credit_for_other.get(&(uid1, cid)).copied().unwrap_or(0.0);
+            let u1_tfo = u1_dfo + u1_cfo;
 
-            let net_amount = (u1_for_other * 100.0).round() / 100.0;
+            if u1_td.abs() < 0.005 && u1_tc < 0.005 { continue; }
+
+            // net = u1_tfo - 0: negative → placeholder owes u1; positive → u1 owes placeholder
+            let (debtor, creditor, net_amount) = if u1_tfo < -0.005 {
+                (placeholder.clone(), uname1.clone(), -u1_tfo)
+            } else if u1_tfo > 0.005 {
+                (uname1.clone(), placeholder.clone(), u1_tfo)
+            } else {
+                (String::new(), String::new(), 0.0)
+            };
+
             let sym = currency_symbols.get(&cid).cloned().unwrap_or_default();
             result.push(UserPairBalance {
-                user1_name:           uname1.clone(),
-                user1_paid_total:     (u1_total    * 100.0).round() / 100.0,
-                user1_paid_for_self:  (u1_for_self * 100.0).round() / 100.0,
-                user1_paid_for_other: (u1_for_other* 100.0).round() / 100.0,
-                user2_name:           placeholder.clone(),
-                user2_paid_total:     0.0,
-                user2_paid_for_self:  0.0,
-                user2_paid_for_other: 0.0,
-                debtor:   if net_amount > 0.005 { placeholder.clone() } else { String::new() },
-                creditor: if net_amount > 0.005 { uname1.clone() } else { String::new() },
-                net_amount,
+                user1_name:             uname1.clone(),
+                user1_total_debit:      round2(u1_td),
+                user1_total_credit:     round2(u1_tc),
+                user1_debit_for_other:  round2(u1_dfo),
+                user1_credit_for_other: round2(u1_cfo),
+                user1_total_for_other:  round2(u1_tfo),
+                user2_name:             placeholder.clone(),
+                user2_total_debit:      0.0,
+                user2_total_credit:     0.0,
+                user2_debit_for_other:  0.0,
+                user2_credit_for_other: 0.0,
+                user2_total_for_other:  0.0,
+                debtor,
+                creditor,
+                net_amount: round2(net_amount),
                 currency_symbol: sym,
             });
         }
@@ -99,57 +115,58 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
             let uid1 = user_ids[i];
             let uid2 = user_ids[j];
 
-            let mut relevant_currencies: std::collections::HashSet<i64> = std::collections::HashSet::new();
-            for &(uid, cid) in paid_total.keys() {
-                if uid == uid1 || uid == uid2 {
-                    relevant_currencies.insert(cid);
-                }
+            let mut cids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+            for &(uid, cid) in total_debit.keys().chain(total_credit.keys()) {
+                if uid == uid1 || uid == uid2 { cids.insert(cid); }
             }
 
-            for cid in relevant_currencies {
-                let u1_total     = paid_total    .get(&(uid1, cid)).copied().unwrap_or(0.0);
-                let u1_for_self  = paid_for_self .get(&(uid1, cid)).copied().unwrap_or(0.0);
-                let u1_for_other = paid_for_other.get(&(uid1, cid)).copied().unwrap_or(0.0);
-                let u2_total     = paid_total    .get(&(uid2, cid)).copied().unwrap_or(0.0);
-                let u2_for_self  = paid_for_self .get(&(uid2, cid)).copied().unwrap_or(0.0);
-                let u2_for_other = paid_for_other.get(&(uid2, cid)).copied().unwrap_or(0.0);
+            for cid in cids {
+                let u1_td  = total_debit    .get(&(uid1, cid)).copied().unwrap_or(0.0);
+                let u1_tc  = total_credit   .get(&(uid1, cid)).copied().unwrap_or(0.0);
+                let u1_dfo = debit_for_other .get(&(uid1, cid)).copied().unwrap_or(0.0);
+                let u1_cfo = credit_for_other.get(&(uid1, cid)).copied().unwrap_or(0.0);
+                let u1_tfo = u1_dfo + u1_cfo;
 
-                if u1_total < 0.005 && u2_total < 0.005 {
+                let u2_td  = total_debit    .get(&(uid2, cid)).copied().unwrap_or(0.0);
+                let u2_tc  = total_credit   .get(&(uid2, cid)).copied().unwrap_or(0.0);
+                let u2_dfo = debit_for_other .get(&(uid2, cid)).copied().unwrap_or(0.0);
+                let u2_cfo = credit_for_other.get(&(uid2, cid)).copied().unwrap_or(0.0);
+                let u2_tfo = u2_dfo + u2_cfo;
+
+                if u1_td.abs() < 0.005 && u1_tc < 0.005 && u2_td.abs() < 0.005 && u2_tc < 0.005 {
                     continue;
                 }
 
-                // Net: user1 covered for user2, user2 covered for user1.
-                // If u1_for_other > u2_for_other → user2 owes user1 the difference.
-                let net = u1_for_other - u2_for_other;
+                // net = u1_tfo - u2_tfo
+                // positive → u1 owes u2; negative → u2 owes u1
+                let net = u1_tfo - u2_tfo;
                 let (debtor, creditor, net_amount) = if net > 0.005 {
-                    (
-                        user_names.get(&uid2).cloned().unwrap_or_default(),
-                        user_names.get(&uid1).cloned().unwrap_or_default(),
-                        net,
-                    )
+                    (user_names.get(&uid1).cloned().unwrap_or_default(),
+                     user_names.get(&uid2).cloned().unwrap_or_default(), net)
                 } else if net < -0.005 {
-                    (
-                        user_names.get(&uid1).cloned().unwrap_or_default(),
-                        user_names.get(&uid2).cloned().unwrap_or_default(),
-                        -net,
-                    )
+                    (user_names.get(&uid2).cloned().unwrap_or_default(),
+                     user_names.get(&uid1).cloned().unwrap_or_default(), -net)
                 } else {
                     (String::new(), String::new(), 0.0)
                 };
 
                 let sym = currency_symbols.get(&cid).cloned().unwrap_or_default();
                 result.push(UserPairBalance {
-                    user1_name:           user_names.get(&uid1).cloned().unwrap_or_default(),
-                    user1_paid_total:     (u1_total    * 100.0).round() / 100.0,
-                    user1_paid_for_self:  (u1_for_self * 100.0).round() / 100.0,
-                    user1_paid_for_other: (u1_for_other* 100.0).round() / 100.0,
-                    user2_name:           user_names.get(&uid2).cloned().unwrap_or_default(),
-                    user2_paid_total:     (u2_total    * 100.0).round() / 100.0,
-                    user2_paid_for_self:  (u2_for_self * 100.0).round() / 100.0,
-                    user2_paid_for_other: (u2_for_other* 100.0).round() / 100.0,
+                    user1_name:             user_names.get(&uid1).cloned().unwrap_or_default(),
+                    user1_total_debit:      round2(u1_td),
+                    user1_total_credit:     round2(u1_tc),
+                    user1_debit_for_other:  round2(u1_dfo),
+                    user1_credit_for_other: round2(u1_cfo),
+                    user1_total_for_other:  round2(u1_tfo),
+                    user2_name:             user_names.get(&uid2).cloned().unwrap_or_default(),
+                    user2_total_debit:      round2(u2_td),
+                    user2_total_credit:     round2(u2_tc),
+                    user2_debit_for_other:  round2(u2_dfo),
+                    user2_credit_for_other: round2(u2_cfo),
+                    user2_total_for_other:  round2(u2_tfo),
                     debtor,
                     creditor,
-                    net_amount: (net_amount * 100.0).round() / 100.0,
+                    net_amount: round2(net_amount),
                     currency_symbol: sym,
                 });
             }

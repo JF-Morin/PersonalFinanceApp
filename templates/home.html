@@ -1,10 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Accueil — Finance Perso{% endblock %}
 
-{% block head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-{% endblock %}
-
 {% block content %}
 <div class="mb-6">
   <h1 class="text-2xl font-bold">Accueil</h1>
@@ -39,17 +35,17 @@
       <div class="text-xs text-gray-500 dark:text-gray-400">Fichiers importés</div>
     </div>
   </div>
-  <div class="card flex items-center gap-3 p-4">
-    <div class="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center text-purple-600 flex-shrink-0">
+  <a href="/transactions"
+     class="card flex flex-col items-center justify-center gap-2 p-4 text-center no-underline
+            hover:border-primary-400 dark:hover:border-primary-500 hover:shadow-md transition-all cursor-pointer">
+    <div class="w-10 h-10 rounded-xl bg-primary-600 flex items-center justify-center text-white flex-shrink-0">
       <i class="fas fa-file-upload"></i>
     </div>
-    <div class="min-w-0 flex-1">
-      <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Relevé PDF</div>
-      <a href="/transactions" class="btn-primary">
-        <i class="fas fa-file-upload"></i> Importer
-      </a>
+    <div>
+      <div class="text-xl font-bold text-primary-600 dark:text-primary-400">Importer</div>
+      <div class="text-xs text-gray-500 dark:text-gray-400">Relevé PDF</div>
     </div>
-  </div>
+  </a>
 </div>
 
 <!-- Balances -->
@@ -108,20 +104,16 @@ function initChart(labels, totals) {
     container.innerHTML = '<div class="max-w-md mx-auto"><canvas id="categoryChart"></canvas></div>';
   }
   var ctx = document.getElementById('categoryChart');
-  if (categoryChart) {
-    categoryChart.data.labels = labels;
-    categoryChart.data.datasets[0].data = totals;
-    categoryChart.update();
-  } else {
-    categoryChart = new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: labels,
-        datasets: [{ data: totals, backgroundColor: CHART_COLORS }]
-      },
-      options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
-    });
-  }
+  var stale = Chart.getChart(ctx);
+  if (stale) stale.destroy();
+  categoryChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{ data: totals, backgroundColor: CHART_COLORS }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
 }
 
 // Init from server-rendered data

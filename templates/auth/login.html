@@ -163,12 +163,12 @@
 <!--
   Single x-data scope wrapping the whole page so user-list buttons and the
   modal overlay share the same state without cross-scope event dispatch.
-    modal: null | 'verify' | 'set'
+    modal: null | 'verify' | 'set' | 'create'
     sel:   null | { id, name }
-    pw, pwc — controlled password inputs
+    pw, pwc, cpw, cpwc, cname, clast, cbank — controlled inputs
 -->
 <body class="bg-gray-50 dark:bg-slate-900 min-h-full flex items-center justify-center p-4"
-      x-data="{ modal: null, sel: null, pw: '', pwc: '' }">
+      x-data="{ modal: null, sel: null, pw: '', pwc: '', cpw: '', cpwc: '', cname: '', clast: '', cbank: '' }">
 
 <div class="w-full max-w-sm">
 
@@ -182,6 +182,26 @@
       {% if users %}Sélectionnez votre profil{% else %}Bienvenue !{% endif %}
     </p>
   </div>
+
+  <!-- Unauthorized banner -->
+  {% if unauthorized %}
+  <div class="mb-4 flex items-center gap-3 bg-amber-50 dark:bg-amber-900/30
+              border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3
+              text-amber-700 dark:text-amber-300 text-sm">
+    <i class="fas fa-lock flex-shrink-0"></i>
+    Accès refusé. Connectez-vous pour accéder à cette page.
+  </div>
+  {% endif %}
+
+  <!-- Duplicate user banner -->
+  {% if user_error == "duplicate" %}
+  <div class="mb-4 flex items-center gap-3 bg-red-50 dark:bg-red-900/30
+              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
+              text-red-700 dark:text-red-300 text-sm">
+    <i class="fas fa-circle-xmark flex-shrink-0"></i>
+    Un profil avec ce prénom existe déjà.
+  </div>
+  {% endif %}
 
   <!-- Error banner -->
   {% if login_error %}
@@ -298,6 +318,17 @@
     </form>
     {% endif %}
 
+    {% if users %}
+    <!-- ── Create new profile button (when users already exist) ── -->
+    <div class="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
+      <button type="button" class="btn-full-indigo"
+              style="background-color:#64748b"
+              @click="cname=''; clast=''; cbank=''; cpw=''; cpwc=''; modal='create'">
+        <i class="fas fa-user-plus"></i> Créer un profil
+      </button>
+    </div>
+    {% endif %}
+
   </div><!-- /card -->
 </div><!-- /centered wrapper -->
 
@@ -331,6 +362,64 @@
              x-text="modal === 'set' ? 'Définissez votre mot de passe' : 'Entrez votre mot de passe'">
         </div>
       </div>
+    </div>
+
+    <!-- Create profile form -->
+    <div x-show="modal === 'create'">
+      <div class="flex items-center gap-2 mb-5">
+        <span class="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center
+                     justify-center text-slate-500 dark:text-slate-300 flex-shrink-0">
+          <i class="fas fa-user-plus text-lg"></i>
+        </span>
+        <div>
+          <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">Nouveau profil</div>
+          <div class="text-xs text-gray-400 mt-0.5">Remplissez les informations ci-dessous</div>
+        </div>
+      </div>
+      <form action="/settings/users" method="POST" class="space-y-3">
+        <input type="hidden" name="redirect_to" value="/login">
+        <div>
+          <label class="lbl">Prénom *</label>
+          <input type="text" name="name" required x-model="cname"
+                 class="field" placeholder="ex : Jean" autocomplete="given-name">
+        </div>
+        <div>
+          <label class="lbl">Nom</label>
+          <input type="text" name="last_name" x-model="clast"
+                 class="field" placeholder="Optionnel" autocomplete="family-name">
+        </div>
+        {% if banks %}
+        <div>
+          <label class="lbl">Banque</label>
+          <select name="bank_id" x-model="cbank" class="field">
+            <option value="">— Aucune —</option>
+            {% for b in banks %}
+            <option value="{{ b.id }}">{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+        <div>
+          <label class="lbl">Mot de passe *</label>
+          <input type="password" name="password" required x-model="cpw"
+                 class="field" placeholder="Choisissez un mot de passe" autocomplete="new-password">
+        </div>
+        <div>
+          <label class="lbl">Confirmer *</label>
+          <input type="password" name="password_confirm" x-model="cpwc"
+                 class="field" placeholder="Répétez le mot de passe" autocomplete="new-password">
+          <p x-show="cpwc.length > 0 && cpw !== cpwc" x-cloak
+             class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+            <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+          </p>
+        </div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" @click="modal = null" class="btn-ghost">Annuler</button>
+          <button type="submit" class="btn-indigo" :disabled="!cname || !cpw || cpw !== cpwc">
+            <i class="fas fa-user-plus"></i> Créer
+          </button>
+        </div>
+      </form>
     </div>
 
     <!-- Verify password form -->

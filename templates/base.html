@@ -232,7 +232,58 @@
     .htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
     .htmx-request .htmx-indicator,
     .htmx-request.htmx-indicator { opacity: 1; }
+
+    /* ── Button variants ──────────────────────────────────────── */
+    .btn-warning {
+      display: inline-flex; align-items: center; gap: 0.75rem;
+      background-color: #f59e0b; color: white;
+      padding: 0.625rem 1.875rem; border-radius: 12px;
+      font-size: 1.3125rem; font-weight: 600; border: none; cursor: pointer;
+      text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      transition: background-color 150ms, box-shadow 150ms, opacity 150ms; user-select: none;
+    }
+    .btn-warning:hover  { background-color: #d97706; box-shadow: 0 3px 8px rgba(0,0,0,0.18); }
+    .btn-warning:active { background-color: #b45309; box-shadow: none; }
+    .btn-warning:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+
+    .btn-danger {
+      display: inline-flex; align-items: center; gap: 0.75rem;
+      background-color: #dc2626; color: white;
+      padding: 0.625rem 1.875rem; border-radius: 12px;
+      font-size: 1.3125rem; font-weight: 600; border: none; cursor: pointer;
+      text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      transition: background-color 150ms, box-shadow 150ms; user-select: none;
+    }
+    .btn-danger:hover  { background-color: #b91c1c; box-shadow: 0 3px 8px rgba(0,0,0,0.18); }
+    .btn-danger:active { background-color: #991b1b; box-shadow: none; }
+
+    .btn-success {
+      display: inline-flex; align-items: center; gap: 0.75rem;
+      background-color: #16a34a; color: white;
+      padding: 0.625rem 1.875rem; border-radius: 12px;
+      font-size: 1.3125rem; font-weight: 600; border: none; cursor: pointer;
+      text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      transition: background-color 150ms, box-shadow 150ms; user-select: none;
+    }
+    .btn-success:hover  { background-color: #15803d; box-shadow: 0 3px 8px rgba(0,0,0,0.18); }
+    .btn-success:active { background-color: #166534; box-shadow: none; }
+
+    /* ── Focus rings (keyboard accessibility) ─────────────────── */
+    .btn-primary:focus-visible, .btn-secondary:focus-visible,
+    .btn-warning:focus-visible, .btn-danger:focus-visible, .btn-success:focus-visible {
+      outline: 3px solid #818cf8; outline-offset: 2px;
+    }
+    .nav-link:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+
+    /* ── Reduced motion ───────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+      }
+    }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   {% block head %}{% endblock %}
 </head>
 
@@ -302,5 +353,20 @@
   </main>
 
 </div>
+
+<script>
+/* Active nav link — runs on first load and after every hx-boost swap */
+function setActiveNav() {
+  var path = window.location.pathname;
+  document.querySelectorAll('a.nav-link').forEach(function(link) {
+    var href = link.getAttribute('href');
+    if (!href) return;
+    var active = href === '/' ? path === '/' : path.startsWith(href);
+    link.classList.toggle('active', active);
+  });
+}
+setActiveNav();
+document.addEventListener('htmx:afterSettle', setActiveNav);
+</script>
 </body>
 </html>

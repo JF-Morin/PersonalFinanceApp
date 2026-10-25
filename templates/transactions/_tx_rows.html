@@ -7,9 +7,13 @@
     class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
   <td class="table-cell text-gray-500 whitespace-nowrap">{{ t.date }}</td>
   <td class="table-cell max-w-xs truncate" title="{{ t.operation }}">{{ t.operation }}</td>
-  <td class="table-cell text-gray-500">{{ t.category_name | default(value="—") }}</td>
+  <td class="table-cell">
+    {% if t.category_name %}{{ t.category_name }}{% else %}<span style="color:#f59e0b">(N/A)</span>{% endif %}
+  </td>
   <td class="table-cell">{{ t.paid_by_name }}</td>
-  <td class="table-cell text-gray-500">{% if t.other_share %}{{ t.other_share }}%{% else %}—{% endif %}</td>
+  <td class="table-cell">
+    {% if t.other_share | json_encode != "null" %}{{ t.other_share }}%{% else %}<span style="color:#f59e0b">(N/A)</span>{% endif %}
+  </td>
   <td class="table-cell">
     {% if t.status_name == "complete" %}
     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
@@ -21,8 +25,14 @@
     </span>
     {% endif %}
   </td>
-  <td class="table-cell font-mono whitespace-nowrap text-right" style="{% if t.amount < 0 %}color:#ef4444{% else %}color:#16a34a{% endif %}">
+  <td class="table-cell text-gray-500 max-w-xs truncate" title="{{ t.notes | default(value='') }}">
+    {{ t.notes | default(value="—") }}
+  </td>
+  <td class="table-cell font-mono whitespace-nowrap" style="{% if t.amount < 0 %}color:#ef4444{% else %}color:#16a34a{% endif %}">
     {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | fixed2 }} {{ t.currency_symbol }}
+    {% if t.foreign_currency_amount | json_encode != "null" %}
+    <span class="text-xs text-gray-400 dark:text-gray-500 ml-0.5">[{{ t.foreign_currency_amount | abs | fixed2 }} {{ t.foreign_currency_symbol }}]</span>
+    {% endif %}
   </td>
   <td class="table-cell">
     {% if t.paid_by_id == current_user_id %}
@@ -36,6 +46,8 @@
               data-category-id="{{ t.category_id | default(value='') }}"
               data-share="{{ t.other_share | default(value='') }}"
               data-notes="{{ t.notes | default(value='') }}"
+              data-foreign-amount="{{ t.foreign_currency_amount | default(value='') }}"
+              data-foreign-currency-id="{{ t.foreign_currency_id | default(value='') }}"
               title="Modifier"
               onmouseenter="this.style.color='#2563eb';this.style.background='rgba(37,99,235,0.08)'"
               onmouseleave="this.style.color='';this.style.background=''">
@@ -44,6 +56,11 @@
       <button class="btn-del-tx w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400 dark:text-red-400"
               data-id="{{ t.id }}"
               data-operation="{{ t.operation }}"
+              data-date="{{ t.date }}"
+              data-amount="{{ t.amount }}"
+              data-currency="{{ t.currency_symbol }}"
+              data-category="{{ t.category_name | default(value='') }}"
+              data-paid-by="{{ t.paid_by_name }}"
               title="Supprimer"
               onmouseenter="this.style.color='#dc2626';this.style.background='rgba(239,68,68,0.12)'"
               onmouseleave="this.style.color='';this.style.background=''">
@@ -56,7 +73,7 @@
 {% endfor %}
 {% else %}
 <tr>
-  <td colspan="8" class="text-center py-12 text-gray-400">
+  <td colspan="9" class="text-center py-12 text-gray-400">
     <i class="fas fa-inbox text-4xl mb-3 block"></i>
     Aucune transaction.
   </td>

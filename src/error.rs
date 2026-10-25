@@ -30,7 +30,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
             // Redirect rather than 401 — this is an HTML app, not a JSON API.
-            AppError::Unauthorized => Redirect::to("/login").into_response(),
+            AppError::Unauthorized => Redirect::to("/login?unauthorized=1").into_response(),
             AppError::NotFound => (StatusCode::NOT_FOUND, "Not found").into_response(),
             e => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }

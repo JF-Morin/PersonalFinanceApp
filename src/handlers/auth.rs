@@ -30,6 +30,8 @@ struct UserLoginView {
 #[derive(Deserialize, Default)]
 pub struct LoginQuery {
     pub error: Option<String>,
+    pub unauthorized: Option<String>,
+    pub user_error: Option<String>,
 }
 
 pub async fn get_login(
@@ -90,6 +92,8 @@ async fn render_login_page(state: &crate::AppState, query: &LoginQuery) -> AppRe
     ctx.insert("theme", &theme);
     ctx.insert("is_dark", &(theme == "dark"));
     ctx.insert("login_error", &query.error.is_some());
+    ctx.insert("unauthorized", &query.unauthorized.is_some());
+    ctx.insert("user_error", &query.user_error.as_deref().unwrap_or(""));
 
     Ok(Html(state.tera.render("auth/login.html", &ctx)?))
 }
@@ -145,10 +149,16 @@ pub async fn post_login(
         }
     }
 
+    sqlx::query("UPDATE users SET last_login = datetime('now') WHERE id = ?")
+        .bind(form.user_id)
+        .execute(&state.db)
+        .await?;
+
     let cookie = Cookie::build(("user_id", form.user_id.to_string()))
         .path("/")
         .http_only(true)
         .build();
+    tracing::info!(user_id = %form.user_id, "User logged in");
     Ok((jar.add(cookie), Redirect::to("/")).into_response())
 }
 

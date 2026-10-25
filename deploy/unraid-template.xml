@@ -12,6 +12,7 @@
   <Category>Finance:</Category>
   <WebUI>http://[IP]:[PORT:3000]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/JF-Morin/PersonalFinanceApp/main/deploy/unraid-template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/JF-Morin/PersonalFinanceApp/main/static/icon.svg</Icon>
   <Description>Personal finance app built with Rust/Axum. Import PDF bank statements, categorise transactions and track shared expenses between users.</Description>
 
   <!-- ── Ports ───────────────────────────────────────────────────────────── -->

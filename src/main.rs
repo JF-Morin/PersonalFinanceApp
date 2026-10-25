@@ -12,6 +12,7 @@ use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod config;
+mod currency;
 mod db;
 mod error;
 mod handlers;
