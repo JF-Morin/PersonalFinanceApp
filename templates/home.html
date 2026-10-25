@@ -13,7 +13,7 @@
       <i class="fas fa-receipt"></i>
     </div>
     <div>
-      <div class="text-xl font-bold">{{ total_transactions }}</div>
+      <div class="text-xl font-bold" id="stat-total-transactions">{{ total_transactions }}</div>
       <div class="text-xs text-gray-500 dark:text-gray-400">Transactions</div>
     </div>
   </div>
@@ -22,7 +22,7 @@
       <i class="fas fa-clock"></i>
     </div>
     <div>
-      <div class="text-xl font-bold">{{ pending_count }}</div>
+      <div class="text-xl font-bold" id="stat-pending-count">{{ pending_count }}</div>
       <div class="text-xs text-gray-500 dark:text-gray-400">À compléter</div>
     </div>
   </div>
@@ -31,7 +31,7 @@
       <i class="fas fa-file-pdf"></i>
     </div>
     <div>
-      <div class="text-xl font-bold">{{ total_files }}</div>
+      <div class="text-xl font-bold" id="stat-total-files">{{ total_files }}</div>
       <div class="text-xs text-gray-500 dark:text-gray-400">Fichiers importés</div>
     </div>
   </div>
@@ -134,6 +134,16 @@ async function refreshBalances() {
   htmx.trigger(document.getElementById('balances-content'), 'load');
 }
 
+async function refreshStats() {
+  try {
+    var r    = await fetch('/home/stats');
+    var data = await r.json();
+    document.getElementById('stat-total-transactions').textContent = data.total_transactions;
+    document.getElementById('stat-pending-count').textContent      = data.pending_count;
+    document.getElementById('stat-total-files').textContent        = data.total_files;
+  } catch (e) { /* silent */ }
+}
+
 // Refresh buttons
 document.getElementById('btn-refresh-balances').addEventListener('click', function () {
   var icon = this.querySelector('i');
@@ -151,13 +161,15 @@ document.getElementById('btn-refresh-chart').addEventListener('click', function 
 // Auto-refresh when tab regains focus
 document.addEventListener('visibilitychange', function () {
   if (!document.hidden) {
+    refreshStats();
     refreshBalances();
     refreshChart();
   }
 });
 
-// SSE: refresh balances (and chart on transaction events) when any user changes data
+// SSE: refresh all home sections when any user changes data
 window.__appChangeHandler = function(evt) {
+  refreshStats();
   refreshBalances();
   if (evt.kind === 'transactions') refreshChart();
 };

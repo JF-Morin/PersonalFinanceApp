@@ -264,3 +264,30 @@ pub async fn get_chart_data(
     let (labels, totals) = compute_chart_data(&state.db).await?;
     Ok(Json(serde_json::json!({ "labels": labels, "totals": totals })))
 }
+
+pub async fn get_stats(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<impl IntoResponse> {
+    super::get_user_id(&jar)?;
+    let total_transactions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
+        .fetch_one(&state.db)
+        .await?;
+    let total_files: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM imported_files WHERE filename != 'manual'"
+    )
+    .fetch_one(&state.db)
+    .await?;
+    let pending_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM transactions t \
+         JOIN transaction_status s ON t.status_id = s.id \
+         WHERE s.name IN ('pending', 'broken')"
+    )
+    .fetch_one(&state.db)
+    .await?;
+    Ok(Json(serde_json::json!({
+        "total_transactions": total_transactions,
+        "total_files": total_files,
+        "pending_count": pending_count,
+    })))
+}

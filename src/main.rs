@@ -105,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/",                        get(handlers::home::get_home))
         .route("/home/balances",           get(handlers::home::get_balances_partial))
         .route("/home/chart-data",         get(handlers::home::get_chart_data))
+        .route("/home/stats",              get(handlers::home::get_stats))
         .route("/settings",                get(handlers::settings::get_settings)
                                           .post(handlers::settings::post_settings))
         .route("/settings/users",          post(handlers::settings::post_new_user))
