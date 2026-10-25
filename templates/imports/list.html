@@ -145,28 +145,44 @@
 </div>
 
 <div class="card overflow-hidden p-0">
-  <div class="overflow-x-auto">
-    <table class="w-full">
-      <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600">
+  <div id="imports-table-wrapper" class="overflow-auto bg-gray-100 dark:bg-slate-900/60">
+    <table class="w-full bg-white dark:bg-slate-800">
+      <thead id="files-thead" class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600 sticky top-0 z-10">
         <tr>
-          <th class="table-header" style="min-width:16rem">Fichier</th>
-          <th class="table-header" style="min-width:10rem">Banque</th>
-          <th class="table-header" style="min-width:12rem">Importé le</th>
-          <th class="table-header" style="min-width:6rem">Lignes</th>
-          <th class="table-header" style="min-width:10rem">Importé par</th>
+          <th class="table-header" style="min-width:16rem">
+            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('filename', this)">Fichier <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
+          <th class="table-header" style="min-width:10rem">
+            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('bank', this)">Banque <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
+          <th class="table-header" style="min-width:12rem">
+            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('date', this)">Importé le <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
+          <th class="table-header" style="min-width:6rem">
+            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('txcount', this)">Transactions <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
+          <th class="table-header" style="min-width:10rem">
+            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('importer', this)">Importé par <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
           <th class="table-header" style="min-width:7rem"></th>
         </tr>
       </thead>
       <tbody id="files-tbody" class="divide-y divide-gray-100 dark:divide-slate-700">
         {% if files %}
         {% for f in files %}
-        <tr id="file-row-{{ f.id }}" class="hover:bg-gray-50 dark:hover:bg-slate-700">
+        <tr id="file-row-{{ f.id }}"
+            data-filename="{{ f.filename }}"
+            data-bank="{{ f.bank_name }}"
+            data-date="{{ f.imported_at }}"
+            data-txcount="{{ f.row_count }}"
+            data-importer="{{ f.importer_name }}"
+            class="hover:bg-gray-50 dark:hover:bg-slate-700">
           <td class="table-cell">
             <i class="fas fa-file-pdf text-red-400 mr-2"></i>{{ f.filename }}
           </td>
           <td class="table-cell text-gray-500">{{ f.bank_name }}</td>
           <td class="table-cell text-gray-500 whitespace-nowrap">{{ f.imported_at }}</td>
-          <td class="table-cell text-center">{{ f.row_count }}</td>
+          <td class="table-cell">{{ f.row_count }}</td>
           <td class="table-cell text-gray-500">{{ f.importer_name }}</td>
           <td class="table-cell text-right">
             <div class="flex items-center gap-1 justify-end">
@@ -631,5 +647,44 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 })();
+</script>
+
+<script>
+(function fitTableHeight() {
+  var wrapper = document.getElementById('imports-table-wrapper');
+  if (!wrapper) return;
+  function fit() {
+    var top = wrapper.getBoundingClientRect().top;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    wrapper.style.height = (window.innerHeight - top - rem) + 'px';
+  }
+  fit();
+  window.addEventListener('resize', fit);
+  document.addEventListener('htmx:afterSettle', fit);
+})();
+
+// Sort for imports table
+var _impSort = { col: null, dir: 0 };
+function impSort(col, el) {
+  var tbody = document.getElementById('files-tbody');
+  var rows  = Array.from(tbody.querySelectorAll('tr[data-filename]'));
+  _impSort.dir = (_impSort.col === col && _impSort.dir === 1) ? -1 : 1;
+  _impSort.col = col;
+  document.querySelectorAll('#files-thead .sort-icon').forEach(function(i) {
+    i.className = 'fas fa-sort text-gray-400 text-xs sort-icon';
+  });
+  var icon = el.querySelector('.sort-icon');
+  if (icon) icon.className = 'fas ' + (_impSort.dir === 1 ? 'fa-sort-up' : 'fa-sort-down') + ' text-indigo-500 text-xs sort-icon';
+  rows.sort(function(a, b) {
+    var va, vb, d = _impSort.dir;
+    if (col === 'filename') { va = a.dataset.filename || ''; vb = b.dataset.filename || ''; return d * va.localeCompare(vb, 'fr'); }
+    if (col === 'bank')     { va = a.dataset.bank     || ''; vb = b.dataset.bank     || ''; return d * va.localeCompare(vb, 'fr'); }
+    if (col === 'date')     { va = a.dataset.date     || ''; vb = b.dataset.date     || ''; return d * va.localeCompare(vb); }
+    if (col === 'txcount')  { va = parseInt(a.dataset.txcount) || 0; vb = parseInt(b.dataset.txcount) || 0; return d * (va - vb); }
+    if (col === 'importer') { va = a.dataset.importer || ''; vb = b.dataset.importer || ''; return d * va.localeCompare(vb, 'fr'); }
+    return 0;
+  });
+  rows.forEach(function(r) { tbody.appendChild(r); });
+}
 </script>
 {% endblock %}

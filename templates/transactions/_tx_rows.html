@@ -4,8 +4,9 @@
     data-date="{{ t.date }}"
     data-op="{{ t.operation }}"
     data-cat="{{ t.category_id | default(value='') }}"
-    class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors border-l-4 {% if t.status_name == 'complete' %}border-transparent{% else %}border-amber-400{% endif %}">
-  <td class="table-cell text-gray-500 whitespace-nowrap">{{ t.date }}</td>
+    data-amount="{{ t.amount }}"
+    class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
+  <td class="table-cell text-gray-500 whitespace-nowrap border-l-4 {% if t.status_name == 'complete' %}border-transparent{% else %}border-amber-400{% endif %}">{{ t.date }}</td>
   <td class="table-cell max-w-xs truncate" title="{{ t.operation }}">{{ t.operation }}</td>
   <td class="table-cell">
     {% if t.category_name %}{{ t.category_name }}{% else %}<span style="color:#f59e0b">(N/A)</span>{% endif %}

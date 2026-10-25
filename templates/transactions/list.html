@@ -524,17 +524,25 @@
 
 <!-- ── Table ──────────────────────────────────────────────────────────────── -->
 <div class="card overflow-hidden p-0">
-  <div class="overflow-x-auto">
-    <table class="w-full">
-      <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600">
+  <div id="table-scroll-wrapper" class="overflow-auto bg-gray-100 dark:bg-slate-900/60">
+    <table class="w-full bg-white dark:bg-slate-800">
+      <thead id="tx-thead" class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600 sticky top-0 z-10">
         <tr>
-          <th class="table-header" style="width:1%;white-space:nowrap">Date</th>
+          <th class="table-header" style="width:1%;white-space:nowrap">
+            <span class="flex items-center gap-1 cursor-pointer select-none whitespace-nowrap" onclick="txSort('date', this)">Date <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
           <th class="table-header" style="min-width:20rem">Opération</th>
-          <th class="table-header" style="min-width:6rem">Catégorie</th>
-          <th class="table-header" style="width:1%;white-space:nowrap">Propriétaire</th>
+          <th class="table-header" style="min-width:6rem">
+            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="txSort('category', this)">Catégorie <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
+          <th class="table-header" style="width:1%;white-space:nowrap">
+            <span class="flex items-center gap-1 cursor-pointer select-none whitespace-nowrap" onclick="txSort('owner', this)">Propriétaire <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
           <th class="table-header" style="min-width:6rem">Participants</th>
           <th class="table-header" style="min-width:16rem">Note</th>
-          <th class="table-header" style="min-width:13rem">Montant</th>
+          <th class="table-header" style="min-width:13rem">
+            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="txSort('amount', this)">Montant <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
+          </th>
           <th class="table-header" style="width:1%;white-space:nowrap"></th>
         </tr>
       </thead>
@@ -1129,8 +1137,11 @@
   function markRowComplete(txId) {
     var row = document.getElementById('tx-row-' + txId);
     if (!row) return;
-    row.classList.remove('border-amber-400');
-    row.classList.add('border-transparent');
+    var firstCell = row.querySelector('td');
+    if (firstCell) {
+      firstCell.classList.remove('border-amber-400');
+      firstCell.classList.add('border-transparent');
+    }
     row.style.transition = 'background-color 0.6s ease';
     row.style.backgroundColor = 'rgba(22,163,74,0.12)';
     setTimeout(function () { row.style.backgroundColor = ''; }, 1400);
@@ -1451,6 +1462,43 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 })();
+
+// Table fills remaining viewport height so only the rows scroll, not the page
+(function fitTableHeight() {
+  var wrapper = document.getElementById('table-scroll-wrapper');
+  if (!wrapper) return;
+  function fit() {
+    var top  = wrapper.getBoundingClientRect().top;
+    var rem  = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    wrapper.style.height = (window.innerHeight - top - rem) + 'px';
+  }
+  fit();
+  window.addEventListener('resize', fit);
+  document.addEventListener('htmx:afterSettle', fit);
+})();
+
+// Sort for transactions table
+var _txSort = { col: null, dir: 0 };
+function txSort(col, el) {
+  var tbody = document.getElementById('tx-tbody');
+  var rows  = Array.from(tbody.querySelectorAll('tr[data-date]'));
+  _txSort.dir = (_txSort.col === col && _txSort.dir === 1) ? -1 : 1;
+  _txSort.col = col;
+  document.querySelectorAll('#tx-thead .sort-icon').forEach(function(i) {
+    i.className = 'fas fa-sort text-gray-400 text-xs sort-icon';
+  });
+  var icon = el.querySelector('.sort-icon');
+  if (icon) icon.className = 'fas ' + (_txSort.dir === 1 ? 'fa-sort-up' : 'fa-sort-down') + ' text-indigo-500 text-xs sort-icon';
+  rows.sort(function(a, b) {
+    var va, vb, d = _txSort.dir;
+    if (col === 'date')     { va = a.dataset.date    || ''; vb = b.dataset.date    || ''; return d * va.localeCompare(vb); }
+    if (col === 'category') { va = a.querySelectorAll('td')[2].textContent.trim(); vb = b.querySelectorAll('td')[2].textContent.trim(); return d * va.localeCompare(vb, 'fr'); }
+    if (col === 'owner')    { va = a.querySelectorAll('td')[3].textContent.trim(); vb = b.querySelectorAll('td')[3].textContent.trim(); return d * va.localeCompare(vb, 'fr'); }
+    if (col === 'amount')   { va = parseFloat(a.dataset.amount) || 0; vb = parseFloat(b.dataset.amount) || 0; return d * (va - vb); }
+    return 0;
+  });
+  rows.forEach(function(r) { tbody.appendChild(r); });
+}
 
 // SSE: refresh transaction list when another user changes data
 window.__appChangeHandler = function(evt) {
