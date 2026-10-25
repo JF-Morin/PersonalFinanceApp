@@ -121,6 +121,15 @@
 .dark .share-pill:hover .share-pill-rm { color: #6366f1; }
 .dark .share-pill-rm:hover { background: rgba(99,102,241,0.25); color: #a5b4fc; }
 
+/* ── Filter bar controls — uniform height/font across buttons, inputs, selects ── */
+.filter-ctrl {
+  height: 2.5rem;
+  padding: 0 1rem;
+  font-size: 1.05rem;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
 /* ── Share add-row controls ─────────────────────────────────────────── */
 .share-add-row {
   display: flex;
@@ -492,25 +501,24 @@
     <div>
       <label class="label">Année</label>
       <div class="flex gap-1 flex-wrap" id="year-btns">
-        <button class="year-btn btn-secondary active-year" data-year=""
-                style="padding:0.35rem 0.75rem;font-size:0.8125rem">Toutes</button>
+        <button class="year-btn btn-secondary active-year filter-ctrl" data-year="">Toutes</button>
       </div>
     </div>
     <div class="flex-1 min-w-48">
       <label class="label">Recherche</label>
       <input type="text" id="search-input" value="{{ filter | default(value='') }}"
-             placeholder="Opération…" class="input" autocomplete="off">
+             placeholder="Opération…" class="input filter-ctrl" autocomplete="off">
     </div>
     <div>
       <label class="label">Catégorie</label>
-      <select id="cat-filter" class="input">
+      <select id="cat-filter" class="input filter-ctrl">
         <option value="">Toutes</option>
         {% for c in categories %}
         <option value="{{ c.id }}" {% if filter_category == c.id %}selected{% endif %}>{{ c.name }}</option>
         {% endfor %}
       </select>
     </div>
-    <button id="btn-reset-filters" class="btn-secondary" style="align-self:flex-end">Réinitialiser</button>
+    <button id="btn-reset-filters" class="btn-secondary filter-ctrl" style="align-self:flex-end">Réinitialiser</button>
   </div>
 </div>
 
@@ -521,13 +529,12 @@
       <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600">
         <tr>
           <th class="table-header" style="width:1%;white-space:nowrap">Date</th>
-          <th class="table-header" style="min-width:10rem">Opération</th>
-          <th class="table-header" style="min-width:9rem">Catégorie</th>
+          <th class="table-header" style="min-width:20rem">Opération</th>
+          <th class="table-header" style="min-width:6rem">Catégorie</th>
           <th class="table-header" style="width:1%;white-space:nowrap">Propriétaire</th>
-          <th class="table-header" style="min-width:8rem">Participants</th>
-          <th class="table-header" style="min-width:10rem">Note</th>
+          <th class="table-header" style="min-width:6rem">Participants</th>
+          <th class="table-header" style="min-width:16rem">Note</th>
           <th class="table-header" style="min-width:13rem">Montant</th>
-          <th class="table-header" style="min-width:9rem">Statut</th>
           <th class="table-header" style="width:1%;white-space:nowrap"></th>
         </tr>
       </thead>
@@ -559,8 +566,7 @@
     var container = document.getElementById('year-btns');
     sorted.forEach(function (y) {
       var btn = document.createElement('button');
-      btn.className = 'year-btn btn-secondary';
-      btn.style.cssText = 'padding:0.35rem 0.75rem;font-size:0.8125rem';
+      btn.className = 'year-btn btn-secondary filter-ctrl';
       btn.dataset.year = y;
       btn.textContent = y;
       container.appendChild(btn);
@@ -943,10 +949,10 @@
   /* ── CSV export ───────────────────────────────────────────────────────── */
   document.getElementById('btn-export-csv').addEventListener('click', function () {
     var rows = ALL_ROWS.filter(function (r) { return r.style.display !== 'none'; });
-    var lines = [['Date','Opération','Catégorie','Propriétaire','Participants','Note','Montant','Statut'].join(',')];
+    var lines = [['Date','Opération','Catégorie','Propriétaire','Participants','Note','Montant'].join(',')];
     rows.forEach(function (r) {
       var cells = r.querySelectorAll('td');
-      var line = Array.from(cells).slice(0, 8).map(function (td) {
+      var line = Array.from(cells).slice(0, 7).map(function (td) {
         return '"' + td.textContent.trim().replace(/"/g, '""') + '"';
       });
       lines.push(line.join(','));
@@ -1123,13 +1129,8 @@
   function markRowComplete(txId) {
     var row = document.getElementById('tx-row-' + txId);
     if (!row) return;
-    var cells = row.querySelectorAll('td');
-    if (cells[7]) {
-      cells[7].innerHTML =
-        '<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium' +
-        ' bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">' +
-        '<i class="fas fa-check"></i> Complète</span>';
-    }
+    row.classList.remove('border-amber-400');
+    row.classList.add('border-transparent');
     row.style.transition = 'background-color 0.6s ease';
     row.style.backgroundColor = 'rgba(22,163,74,0.12)';
     setTimeout(function () { row.style.backgroundColor = ''; }, 1400);

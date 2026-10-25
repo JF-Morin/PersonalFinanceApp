@@ -4,7 +4,7 @@
     data-date="{{ t.date }}"
     data-op="{{ t.operation }}"
     data-cat="{{ t.category_id | default(value='') }}"
-    class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
+    class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors border-l-4 {% if t.status_name == 'complete' %}border-transparent{% else %}border-amber-400{% endif %}">
   <td class="table-cell text-gray-500 whitespace-nowrap">{{ t.date }}</td>
   <td class="table-cell max-w-xs truncate" title="{{ t.operation }}">{{ t.operation }}</td>
   <td class="table-cell">
@@ -32,17 +32,6 @@
     {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | fixed2 }} {{ t.currency_symbol }}
     {% if t.foreign_currency_amount | json_encode != "null" %}
     <span class="text-xs text-gray-400 dark:text-gray-500 ml-0.5">[{{ t.foreign_currency_amount | abs | fixed2 }} {{ t.foreign_currency_symbol }}]</span>
-    {% endif %}
-  </td>
-  <td class="table-cell">
-    {% if t.status_name == "complete" %}
-    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
-      <i class="fas fa-check"></i> Complète
-    </span>
-    {% else %}
-    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
-      <i class="fas fa-clock"></i> En attente
-    </span>
     {% endif %}
   </td>
   <td class="table-cell">
@@ -84,7 +73,7 @@
 {% endfor %}
 {% else %}
 <tr>
-  <td colspan="9" class="text-center py-12 text-gray-400">
+  <td colspan="8" class="text-center py-12 text-gray-400">
     <i class="fas fa-inbox text-4xl mb-3 block"></i>
     Aucune transaction.
   </td>

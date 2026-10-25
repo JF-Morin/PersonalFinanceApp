@@ -17,14 +17,14 @@
             sans: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
           },
           fontSize: {
-            'xs':   ['1.125rem',  { lineHeight: '1.5rem'  }],
-            'sm':   ['1.3125rem', { lineHeight: '1.75rem' }],
-            'base': ['1.5rem',    { lineHeight: '2rem'    }],
-            'lg':   ['1.6875rem', { lineHeight: '2.25rem' }],
-            'xl':   ['1.875rem',  { lineHeight: '2.25rem' }],
-            '2xl':  ['2.25rem',   { lineHeight: '2.5rem'  }],
-            '3xl':  ['2.8125rem', { lineHeight: '3.25rem' }],
-            '4xl':  ['3.375rem',  { lineHeight: '1'       }],
+            'xs':   ['0.9rem',   { lineHeight: '1.25rem' }],
+            'sm':   ['1.05rem',  { lineHeight: '1.5rem'  }],
+            'base': ['1.2rem',   { lineHeight: '1.625rem'}],
+            'lg':   ['1.35rem',  { lineHeight: '1.875rem'}],
+            'xl':   ['1.5rem',   { lineHeight: '2rem'    }],
+            '2xl':  ['1.875rem', { lineHeight: '2.125rem'}],
+            '3xl':  ['2.35rem',  { lineHeight: '2.75rem' }],
+            '4xl':  ['2.875rem', { lineHeight: '1'       }],
           },
           colors: {
             primary: {
@@ -53,7 +53,7 @@
       gap: 1.125rem;
       padding: 0.625rem 1.125rem;
       border-radius: 0.75rem;
-      font-size: 1.3125rem;
+      font-size: 1.05rem;
       font-weight: 500;
       color: #4b5563;           /* gray-600 */
       transition: background-color 150ms, color 150ms;
@@ -125,9 +125,9 @@
       gap: 0.75rem;
       background-color: #4f46e5;
       color: white;
-      padding: 0.625rem 1.875rem;
+      padding: 0.5rem 1.5rem;
       border-radius: 12px;
-      font-size: 1.3125rem;
+      font-size: 1.05rem;
       font-weight: 600;
       border: none;
       cursor: pointer;
@@ -145,9 +145,9 @@
       gap: 0.75rem;
       background-color: #e0e7ff;   /* primary-100 */
       color: #4338ca;              /* primary-700 */
-      padding: 0.625rem 1.875rem;
+      padding: 0.5rem 1.5rem;
       border-radius: 12px;
-      font-size: 1.3125rem;
+      font-size: 1.05rem;
       font-weight: 600;
       border: none;
       cursor: pointer;
@@ -165,8 +165,8 @@
     .input {
       width: 100%;
       border-radius: 1rem;
-      padding: 0.75rem 1.5rem;
-      font-size: 1.3125rem;
+      padding: 0.625rem 1.25rem;
+      font-size: 1.05rem;
       background-color: #ffffff;
       color: #111827;              /* gray-900 */
       border: 2px solid #d1d5db;  /* gray-300 */
@@ -205,7 +205,7 @@
 
     .label {
       display: block;
-      font-size: 1.125rem;
+      font-size: 0.9rem;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -216,16 +216,16 @@
 
     /* ── Table ───────────────────────────────────────────────── */
     .table-header {
-      padding: 0.75rem 1.5rem;
+      padding: 0.5rem 1.25rem;
       text-align: left;
-      font-size: 1.125rem;
+      font-size: 0.9rem;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: #6b7280;
     }
     .dark .table-header { color: #94a3b8; }
-    .table-cell { padding: 0.875rem 1.5rem; font-size: 1.40625rem; color: #1f2937; }
+    .table-cell { padding: 0.625rem 1.25rem; font-size: 1.1rem; color: #1f2937; }
     .dark .table-cell { color: #e2e8f0; }
 
     /* ── HTMX loading bar ────────────────────────────────────── */
@@ -237,8 +237,8 @@
     .btn-warning {
       display: inline-flex; align-items: center; gap: 0.75rem;
       background-color: #f59e0b; color: white;
-      padding: 0.625rem 1.875rem; border-radius: 12px;
-      font-size: 1.3125rem; font-weight: 600; border: none; cursor: pointer;
+      padding: 0.5rem 1.5rem; border-radius: 12px;
+      font-size: 1.05rem; font-weight: 600; border: none; cursor: pointer;
       text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
       transition: background-color 150ms, box-shadow 150ms, opacity 150ms; user-select: none;
     }
@@ -249,8 +249,8 @@
     .btn-danger {
       display: inline-flex; align-items: center; gap: 0.75rem;
       background-color: #dc2626; color: white;
-      padding: 0.625rem 1.875rem; border-radius: 12px;
-      font-size: 1.3125rem; font-weight: 600; border: none; cursor: pointer;
+      padding: 0.5rem 1.5rem; border-radius: 12px;
+      font-size: 1.05rem; font-weight: 600; border: none; cursor: pointer;
       text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
       transition: background-color 150ms, box-shadow 150ms; user-select: none;
     }
@@ -260,8 +260,8 @@
     .btn-success {
       display: inline-flex; align-items: center; gap: 0.75rem;
       background-color: #16a34a; color: white;
-      padding: 0.625rem 1.875rem; border-radius: 12px;
-      font-size: 1.3125rem; font-weight: 600; border: none; cursor: pointer;
+      padding: 0.5rem 1.5rem; border-radius: 12px;
+      font-size: 1.05rem; font-weight: 600; border: none; cursor: pointer;
       text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
       transition: background-color 150ms, box-shadow 150ms; user-select: none;
     }
