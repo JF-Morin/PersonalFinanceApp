@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     error::{AppError, AppResult},
     models::{Bank, ParsedTransaction},
-    parsers::{detect_and_parse, detect_and_parse_positioned, lopdf_text},
+    parsers::{all_parsers, detect_and_parse, detect_and_parse_positioned, lopdf_text},
     AppState,
 };
 use super::base_context;
@@ -27,6 +27,7 @@ struct ImportedFileView {
     source_file: String,
     bank_name: String,
     importer_name: String,
+    importer_id: i64,
 }
 
 pub async fn get_imported_files(
@@ -34,12 +35,14 @@ pub async fn get_imported_files(
     jar: CookieJar,
 ) -> AppResult<Html<String>> {
     let mut ctx = base_context(&jar, &state.db).await?;
+    let current_user_id = super::get_user_id(&jar)?;
 
     let files = sqlx::query_as::<_, ImportedFileView>(
         r#"
         SELECT f.id, f.filename, f.imported_at, f.row_count, f.source_file,
                b.name AS bank_name,
-               u.name || COALESCE(' ' || u.last_name, '') AS importer_name
+               u.name || COALESCE(' ' || u.last_name, '') AS importer_name,
+               f.importer_id
         FROM imported_files f
         JOIN banks b ON f.bank_id = b.id
         JOIN users u ON f.importer_id = u.id
@@ -50,109 +53,17 @@ pub async fn get_imported_files(
     .fetch_all(&state.db)
     .await?;
 
+    let banks = sqlx::query_as::<_, Bank>("SELECT * FROM banks ORDER BY name")
+        .fetch_all(&state.db)
+        .await?;
+
     ctx.insert("files", &files);
+    ctx.insert("current_user_id", &current_user_id);
+    ctx.insert("banks", &banks);
     let html = state.tera.render("imports/list.html", &ctx)?;
     Ok(Html(html))
 }
 
-pub async fn get_upload(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> AppResult<Html<String>> {
-    let mut ctx = base_context(&jar, &state.db).await?;
-    let banks = sqlx::query_as::<_, Bank>("SELECT * FROM banks ORDER BY name")
-        .fetch_all(&state.db)
-        .await?;
-    ctx.insert("banks", &banks);
-    ctx.insert("parse_error", &Option::<String>::None);
-    ctx.insert("parsed_transactions", &Option::<Vec<ParsedTransaction>>::None);
-
-    let html = state.tera.render("imports/upload.html", &ctx)?;
-    Ok(Html(html))
-}
-
-pub async fn post_upload(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    _headers: HeaderMap,
-    mut multipart: Multipart,
-) -> AppResult<impl IntoResponse> {
-    let user_id = super::get_user_id(&jar)?;
-
-    let mut file_bytes: Option<bytes::Bytes> = None;
-    let mut original_name = String::from("upload.pdf");
-
-    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::Other(e.to_string()))? {
-        if field.name() == Some("file") {
-            original_name = field
-                .file_name()
-                .unwrap_or("upload.pdf")
-                .to_string();
-            file_bytes = Some(field.bytes().await.map_err(|e| AppError::Other(e.to_string()))?);
-        }
-    }
-
-    let bytes = file_bytes.ok_or_else(|| AppError::Other("No file provided".into()))?;
-
-    tracing::info!(filename = %original_name, bytes = %bytes.len(), user_id = %user_id, "PDF upload received");
-
-    let (bank_id, bank_name, transactions) =
-        match safe_detect_and_parse(bytes.clone(), &original_name).await {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::warn!(filename = %original_name, error = %e, "No parser matched uploaded file");
-                let mut ctx = tera::Context::new();
-                ctx.insert("parse_error", &Some(e.to_string()));
-                ctx.insert("parsed_transactions", &Option::<Vec<ParsedTransaction>>::None);
-                let html = state.tera.render("imports/_preview.html", &ctx)?;
-                return Ok(Html(html).into_response());
-            }
-        };
-
-    // Save file to storage
-    let storage_root = PathBuf::from(&state.config.storage_path);
-    let statements_dir = storage_root.join("Statements").join(&bank_name);
-    tokio::fs::create_dir_all(&statements_dir).await?;
-
-    let safe_name = sanitize_filename(&original_name);
-    let dest_path = statements_dir.join(&safe_name);
-    tokio::fs::write(&dest_path, &bytes).await?;
-    tracing::info!(path = %dest_path.display(), "PDF saved to storage");
-
-    let relative_path = format!("Statements/{}/{}", bank_name, safe_name);
-    let content_hash = format!("{:x}", Sha256::digest(&bytes));
-
-    // Warn the user in the preview if the same content was already imported (regardless of filename).
-    let already_imported_at: Option<String> = sqlx::query_scalar(
-        "SELECT imported_at FROM imported_files WHERE content_hash = ? LIMIT 1",
-    )
-    .bind(&content_hash)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
-
-    let transactions_json = serde_json::to_string(&transactions)
-        .map_err(|e| AppError::Other(e.to_string()))?;
-
-    let broken_count = transactions.iter().filter(|t| t.parse_note.is_some()).count();
-
-    let mut ctx = tera::Context::new();
-    ctx.insert("parse_error", &Option::<String>::None);
-    ctx.insert("parsed_transactions", &Some(&transactions));
-    ctx.insert("transactions_json", &transactions_json);
-    ctx.insert("bank_id", &bank_id);
-    ctx.insert("bank_name", &bank_name);
-    ctx.insert("filename", &safe_name);
-    ctx.insert("source_file", &relative_path);
-    ctx.insert("user_id", &user_id);
-    ctx.insert("broken_count", &broken_count);
-    ctx.insert("already_imported_at", &already_imported_at);
-    ctx.insert("content_hash", &content_hash);
-
-    let html = state.tera.render("imports/_preview.html", &ctx)?;
-    Ok(Html(html).into_response())
-}
 
 #[derive(Deserialize)]
 pub struct ConfirmImportForm {
@@ -334,8 +245,8 @@ async fn analyze_inner(
     // Compute hash and check for duplicates BEFORE writing to storage.
     let content_hash = format!("{:x}", Sha256::digest(&bytes));
 
-    let already_imported_at: Option<String> = sqlx::query_scalar(
-        "SELECT imported_at FROM imported_files WHERE content_hash = ? LIMIT 1",
+    let existing_import: Option<(i64, String)> = sqlx::query_as(
+        "SELECT id, imported_at FROM imported_files WHERE content_hash = ? LIMIT 1",
     )
     .bind(&content_hash)
     .fetch_optional(&state.db)
@@ -343,18 +254,18 @@ async fn analyze_inner(
     .ok()
     .flatten();
 
-    if let Some(ref imported_at) = already_imported_at {
-        tracing::warn!(
-            filename    = %original_name,
-            imported_at = %imported_at,
-            "Rejected: duplicate content hash"
+    if let Some((existing_file_id, imported_at)) = existing_import {
+        tracing::info!(
+            filename         = %original_name,
+            imported_at      = %imported_at,
+            existing_file_id = %existing_file_id,
+            "Duplicate content hash — offering reparse"
         );
         return Ok(Json(serde_json::json!({
             "ok": false,
-            "error": format!(
-                "Ce fichier a déjà été importé le {}. Supprimez l'import existant avant de réimporter.",
-                imported_at
-            )
+            "duplicate": true,
+            "existing_file_id": existing_file_id,
+            "imported_at": imported_at,
         })).into_response());
     }
 
@@ -417,14 +328,34 @@ async fn safe_detect_and_parse(
 
     match text_result {
         Ok(Ok(text)) => {
-            // Normal path
+            // If the matched parser prefers positioned extraction (e.g. BNP Paribas), use
+            // lopdf so that debit/credit can be distinguished by column X coordinate rather
+            // than by operation keywords.
+            let prefers_positioned = all_parsers()
+                .iter()
+                .any(|p| p.detect(&text) && p.prefers_positioned());
+
+            if prefers_positioned {
+                tracing::info!(filename = %filename, "Parser prefers positioned — using lopdf path");
+                match lopdf_fallback(&bytes, filename) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        tracing::warn!(
+                            filename = %filename,
+                            error    = %e,
+                            "lopdf positioned failed, falling back to text parse"
+                        );
+                        // fall through to the text-based parse below
+                    }
+                }
+            }
+
             detect_and_parse(&text).map_err(|e| {
                 tracing::warn!(filename = %filename, error = %e, "No parser matched (text path)");
                 AppError::Other(e.to_string())
             })
         }
         Ok(Err(pdf_err)) => {
-            // pdf_extract returned an error (not a panic)
             tracing::warn!(
                 filename = %filename,
                 error    = %pdf_err,
@@ -433,7 +364,6 @@ async fn safe_detect_and_parse(
             lopdf_fallback(&bytes, filename)
         }
         Err(_panic_payload) => {
-            // pdf_extract panicked (e.g. Type3 font with missing glyphs)
             tracing::warn!(filename = %filename, "pdf_extract panicked, trying lopdf fallback");
             lopdf_fallback(&bytes, filename)
         }
@@ -550,6 +480,119 @@ async fn delete_file_inner(
     Ok(Json(serde_json::json!({
         "ok": true,
         "transactions_deleted": transactions_deleted,
+    }))
+    .into_response())
+}
+
+// ── Reparse imported file ─────────────────────────────────────────────────────
+
+pub async fn post_reparse_imported_file(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(file_id): Path<i64>,
+) -> impl IntoResponse {
+    match reparse_inner(&state, &jar, file_id).await {
+        Ok(resp) => resp,
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
+    }
+}
+
+async fn reparse_inner(
+    state: &AppState,
+    jar: &CookieJar,
+    file_id: i64,
+) -> AppResult<axum::response::Response> {
+    let user_id = super::get_user_id(jar)?;
+
+    // Fetch file record; verify ownership
+    let row: Option<(String, String, i64)> = sqlx::query_as(
+        "SELECT filename, source_file, importer_id FROM imported_files WHERE id = ?",
+    )
+    .bind(file_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let (filename, source_file, importer_id) =
+        row.ok_or_else(|| AppError::Other("Fichier introuvable".into()))?;
+
+    if importer_id != user_id {
+        return Err(AppError::Other(
+            "Vous n'êtes pas autorisé à réanalyser ce fichier.".into(),
+        ));
+    }
+
+    // Load the stored PDF
+    let full_path = PathBuf::from(&state.config.storage_path).join(&source_file);
+    let file_data = tokio::fs::read(&full_path).await.map_err(|e| {
+        AppError::Other(format!("Impossible de lire le fichier en stockage : {}", e))
+    })?;
+    let bytes = bytes::Bytes::from(file_data);
+
+    // Re-parse
+    let (_, _, new_txs) = safe_detect_and_parse(bytes, &filename).await.map_err(|e| {
+        AppError::Other(format!("Erreur de parsing : {}", e))
+    })?;
+
+    // Fetch existing transactions for deduplication (date + operation + amount)
+    let existing: Vec<(String, String, f64)> = sqlx::query_as(
+        "SELECT date, operation, amount FROM transactions WHERE from_file_id = ?",
+    )
+    .bind(file_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let default_currency_id: i64 = crate::db::get_setting(&state.db, "default_currency_id")
+        .await
+        .unwrap_or_else(|_| "1".to_string())
+        .parse()
+        .unwrap_or(1);
+
+    let mut added: i64 = 0;
+    let mut skipped: i64 = 0;
+
+    for tx in &new_txs {
+        let already_exists = existing.iter().any(|(d, op, amt)| {
+            d == &tx.date && op == &tx.operation && (amt - tx.amount).abs() < 0.005
+        });
+
+        if already_exists {
+            skipped += 1;
+            continue;
+        }
+
+        let status_id: i64 = if tx.parse_note.is_some() { 3 } else { 1 };
+        sqlx::query(
+            "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, \
+             paid_by, status_id, from_file_id, parse_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&tx.date)
+        .bind(&tx.transaction_date)
+        .bind(&tx.operation)
+        .bind(tx.amount)
+        .bind(default_currency_id)
+        .bind(user_id)
+        .bind(status_id)
+        .bind(file_id)
+        .bind(&tx.parse_note)
+        .execute(&state.db)
+        .await?;
+
+        added += 1;
+    }
+
+    tracing::info!(
+        file_id  = %file_id,
+        user_id  = %user_id,
+        added    = %added,
+        skipped  = %skipped,
+        "Reparse complete"
+    );
+
+    Ok(Json(serde_json::json!({
+        "ok":      true,
+        "added":   added,
+        "skipped": skipped,
+        "total":   new_txs.len(),
     }))
     .into_response())
 }

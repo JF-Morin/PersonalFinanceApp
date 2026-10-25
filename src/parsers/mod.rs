@@ -23,6 +23,12 @@ pub trait BankParser: Send + Sync {
     fn detect_positioned(&self, _items: &[lopdf_text::TextItem]) -> Option<bool> {
         None
     }
+    /// Return true to use lopdf-positioned extraction as the primary parse path.
+    /// When true, `safe_detect_and_parse` skips pdf_extract and calls parse_positioned
+    /// directly, which allows debit/credit detection via column X coordinates.
+    fn prefers_positioned(&self) -> bool {
+        false
+    }
     /// Extract (opening_balance, closing_balance) from the statement text.
     /// Returns None if the lines cannot be found — validation is skipped in that case.
     fn extract_balances(&self, text: &str) -> Option<(f64, f64)> {

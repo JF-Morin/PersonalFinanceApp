@@ -70,11 +70,23 @@ pub async fn get_transactions(
         .parse()
         .unwrap_or(1);
 
+    // Other user's first name for the "Part de X" column header.
+    let other_user_name: String = sqlx::query_scalar(
+        "SELECT name FROM users WHERE id != ? ORDER BY id LIMIT 1",
+    )
+    .bind(current_user_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "l'autre".to_string());
+
     ctx.insert("transactions", &transactions);
     ctx.insert("categories", &categories);
     ctx.insert("currencies", &currencies);
     ctx.insert("banks", &banks);
     ctx.insert("current_user_id", &current_user_id);
+    ctx.insert("other_user_name", &other_user_name);
     ctx.insert("filter", &filter.search);
     ctx.insert("filter_category", &filter.category_id);
     ctx.insert("pending_json", &pending_json);

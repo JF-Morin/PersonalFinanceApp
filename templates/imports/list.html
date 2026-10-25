@@ -4,30 +4,98 @@
 {% block content %}
 <div class="mb-6 flex items-center justify-between">
   <h1 class="text-2xl font-bold">Fichiers importés</h1>
-  <a href="/transactions" class="btn-primary"><i class="fas fa-file-upload mr-1"></i> Importer</a>
+  <button id="btn-import" class="btn-primary"><i class="fas fa-file-upload mr-1"></i> Importer</button>
+</div>
+
+<!-- ── Import modal ────────────────────────────────────────────────────────── -->
+<div id="import-modal"
+     style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px)"
+     class="flex items-center justify-center p-4">
+  <div class="card w-full max-w-xl relative" style="max-height:88vh;overflow-y:auto"
+       onclick="event.stopPropagation()">
+
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-base font-semibold">
+        <i class="fas fa-file-upload text-primary-600 mr-2"></i>Importer un relevé PDF
+      </h2>
+      <button id="im-close"
+              class="w-8 h-8 flex items-center justify-center rounded-full
+                     text-gray-400 hover:text-gray-700 dark:hover:text-white
+                     hover:bg-gray-100 dark:hover:bg-slate-700 border-none bg-transparent cursor-pointer">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+      Banques supportées :
+      {% for b in banks %}<strong>{{ b.name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+
+    <!-- Drop zone -->
+    <div id="im-drop-target"
+         class="border-2 border-dashed border-gray-300 dark:border-slate-600
+                rounded-xl p-8 text-center cursor-pointer transition-colors select-none mb-4">
+      <i class="fas fa-file-pdf text-4xl text-gray-300 dark:text-slate-500 mb-3 block"></i>
+      <p class="text-gray-500 dark:text-gray-400 text-sm">
+        Glissez des fichiers PDF ici ou
+        <span class="text-primary-600 font-medium">cliquez pour choisir</span>
+      </p>
+      <p class="text-xs text-gray-400 mt-1">Plusieurs fichiers acceptés</p>
+    </div>
+    <input type="file" id="im-file-input" accept=".pdf" multiple class="hidden">
+
+    <!-- Import summary -->
+    <div id="im-import-summary" style="display:none"
+         class="mb-4 rounded-xl border border-green-200 dark:border-green-800
+                bg-green-50 dark:bg-green-900/20 p-3">
+      <h3 class="text-sm font-semibold flex items-center gap-2
+                 text-green-700 dark:text-green-400 mb-2">
+        <i class="fas fa-check-circle"></i> Résumé de l'import
+      </h3>
+      <div id="im-summary-list" class="space-y-1"></div>
+    </div>
+
+    <!-- File queue -->
+    <div id="im-file-queue" style="display:none">
+      <div class="flex items-center gap-2 mb-3 pb-3 border-b border-gray-200 dark:border-slate-700">
+        <span class="text-xs font-semibold text-gray-700 dark:text-gray-200"
+              id="im-file-count">0 fichier(s)</span>
+        <button id="im-btn-analyze-all" class="btn-primary"
+                style="padding:0.4rem 0.9rem;font-size:0.875rem">
+          <i class="fas fa-play mr-1"></i> Analyser tout
+        </button>
+        <button id="im-btn-delete-all" class="btn-secondary"
+                style="padding:0.4rem 0.9rem;font-size:0.875rem">
+          <i class="fas fa-trash mr-1 text-red-500"></i> Tout supprimer
+        </button>
+      </div>
+      <div id="im-file-list" class="space-y-2" style="max-height:16rem;overflow-y:auto"></div>
+    </div>
+
+  </div>
 </div>
 
 <!-- Toast notification -->
-<div id="delete-toast"
+<div id="toast"
      style="display:none; position:fixed; bottom:1.5rem; right:1.5rem; z-index:1000"
-     class="bg-green-600 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2">
-  <i class="fas fa-check-circle"></i>
-  <span id="delete-toast-msg"></span>
+     class="text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2">
+  <i id="toast-icon" class="fas fa-check-circle"></i>
+  <span id="toast-msg"></span>
 </div>
 
 <!-- Delete confirmation modal -->
 <div id="delete-modal"
      style="display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.5)"
      class="flex items-center justify-center p-4">
-  <div class="card max-w-lg w-full">
+  <div class="card max-w-xl w-full">
     <h2 class="text-lg font-semibold mb-2">Supprimer le fichier</h2>
     <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">
       <i class="fas fa-file-pdf text-red-400 mr-1"></i>
-      <span id="modal-filename" class="font-medium text-gray-900 dark:text-white"></span>
+      <span id="del-modal-filename" class="font-medium text-gray-900 dark:text-white"></span>
     </p>
     <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 mt-3">
       Voulez-vous également supprimer les
-      <strong id="modal-row-count"></strong> transactions associées à ce fichier ?
+      <strong id="del-modal-row-count"></strong> transactions associées à ce fichier ?
     </p>
     <div class="flex flex-col gap-2">
       <button id="btn-delete-with-tx"
@@ -40,6 +108,35 @@
         <i class="fas fa-file-slash mr-2"></i> Non — supprimer le fichier uniquement
       </button>
       <button id="btn-cancel-delete"
+              class="btn-secondary w-full justify-center mt-1">
+        Annuler
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Reparse confirmation modal -->
+<div id="reparse-modal"
+     style="display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.5)"
+     class="flex items-center justify-center p-4">
+  <div class="card max-w-lg w-full">
+    <h2 class="text-lg font-semibold mb-2">
+      <i class="fas fa-rotate text-indigo-500 mr-2"></i>Réanalyser le fichier
+    </h2>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">
+      <i class="fas fa-file-pdf text-red-400 mr-1"></i>
+      <span id="reparse-modal-filename" class="font-medium text-gray-900 dark:text-white"></span>
+    </p>
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 mt-3">
+      Le fichier sera réanalysé et les transactions manquantes ou supprimées par erreur seront
+      ajoutées automatiquement. Les transactions existantes ne seront pas modifiées.
+    </p>
+    <div class="flex flex-col gap-2">
+      <button id="btn-confirm-reparse"
+              class="btn-primary w-full justify-center">
+        <i class="fas fa-rotate mr-2"></i> Oui — rechercher les transactions manquantes
+      </button>
+      <button id="btn-cancel-reparse"
               class="btn-secondary w-full justify-center mt-1">
         Annuler
       </button>
@@ -72,16 +169,29 @@
           <td class="table-cell text-center">{{ f.row_count }}</td>
           <td class="table-cell text-gray-500">{{ f.importer_name }}</td>
           <td class="table-cell text-right">
-            <button
-              class="w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400 dark:text-red-400 delete-btn"
-              data-id="{{ f.id }}"
-              data-filename="{{ f.filename }}"
-              data-row-count="{{ f.row_count }}"
-              title="Supprimer ce fichier"
-              onmouseenter="this.style.color='#dc2626';this.style.background='rgba(239,68,68,0.12)'"
-              onmouseleave="this.style.color='';this.style.background=''">
-              <i class="fas fa-trash-can text-xs"></i>
-            </button>
+            <div class="flex items-center gap-1 justify-end">
+              {% if f.importer_id == current_user_id %}
+              <button
+                class="reparse-btn w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-indigo-400 dark:text-indigo-400"
+                data-id="{{ f.id }}"
+                data-filename="{{ f.filename }}"
+                title="Réanalyser — rechercher les transactions manquantes"
+                onmouseenter="this.style.color='#4f46e5';this.style.background='rgba(79,70,229,0.1)'"
+                onmouseleave="this.style.color='';this.style.background=''">
+                <i class="fas fa-rotate text-xs"></i>
+              </button>
+              {% endif %}
+              <button
+                class="delete-btn w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400 dark:text-red-400"
+                data-id="{{ f.id }}"
+                data-filename="{{ f.filename }}"
+                data-row-count="{{ f.row_count }}"
+                title="Supprimer ce fichier"
+                onmouseenter="this.style.color='#dc2626';this.style.background='rgba(239,68,68,0.12)'"
+                onmouseleave="this.style.color='';this.style.background=''">
+                <i class="fas fa-trash-can text-xs"></i>
+              </button>
+            </div>
           </td>
         </tr>
         {% endfor %}
@@ -100,50 +210,64 @@
 
 <script>
 (function () {
-  var modal       = document.getElementById('delete-modal');
-  var modalName   = document.getElementById('modal-filename');
-  var modalCount  = document.getElementById('modal-row-count');
-  var btnWithTx   = document.getElementById('btn-delete-with-tx');
-  var btnFileOnly = document.getElementById('btn-delete-file-only');
-  var btnCancel   = document.getElementById('btn-cancel-delete');
-  var toast       = document.getElementById('delete-toast');
-  var toastMsg    = document.getElementById('delete-toast-msg');
+  var deleteModal   = document.getElementById('delete-modal');
+  var reparseModal  = document.getElementById('reparse-modal');
+  var toast         = document.getElementById('toast');
+  var toastIcon     = document.getElementById('toast-icon');
+  var toastMsg      = document.getElementById('toast-msg');
 
-  var currentId = null;
+  var delFilename   = document.getElementById('del-modal-filename');
+  var delRowCount   = document.getElementById('del-modal-row-count');
+  var btnWithTx     = document.getElementById('btn-delete-with-tx');
+  var btnFileOnly   = document.getElementById('btn-delete-file-only');
+  var btnCancelDel  = document.getElementById('btn-cancel-delete');
 
-  // Open modal when a delete button is clicked
+  var reparseFilename = document.getElementById('reparse-modal-filename');
+  var btnConfirmReparse = document.getElementById('btn-confirm-reparse');
+  var btnCancelReparse  = document.getElementById('btn-cancel-reparse');
+
+  var currentDeleteId  = null;
+  var currentReparseId = null;
+
+  function showToast(msg, success) {
+    toast.style.background = success ? '#059669' : '#dc2626';
+    toastIcon.className = 'fas ' + (success ? 'fa-check-circle' : 'fa-circle-xmark');
+    toastMsg.textContent = msg;
+    toast.style.display = 'flex';
+    setTimeout(function () { toast.style.display = 'none'; }, 5000);
+  }
+
+  // ── Delete ──────────────────────────────────────────────────────────────────
   document.querySelectorAll('.delete-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      currentId = btn.dataset.id;
-      modalName.textContent  = btn.dataset.filename;
-      modalCount.textContent = btn.dataset.rowCount;
-      modal.style.display = 'flex';
+      currentDeleteId = btn.dataset.id;
+      delFilename.textContent  = btn.dataset.filename;
+      delRowCount.textContent  = btn.dataset.rowCount;
+      deleteModal.style.display = 'flex';
     });
   });
 
-  btnCancel.addEventListener('click', function () { modal.style.display = 'none'; });
-  modal.addEventListener('click', function (e) {
-    if (e.target === modal) modal.style.display = 'none';
+  btnCancelDel.addEventListener('click', function () { deleteModal.style.display = 'none'; });
+  deleteModal.addEventListener('click', function (e) {
+    if (e.target === deleteModal) deleteModal.style.display = 'none';
   });
 
   btnWithTx.addEventListener('click',   function () { doDelete(true);  });
   btnFileOnly.addEventListener('click', function () { doDelete(false); });
 
   async function doDelete(withTransactions) {
-    if (!currentId) return;
-    var url = '/imported-files/' + currentId + '/delete?with_transactions=' + (withTransactions ? '1' : '0');
-    modal.style.display = 'none';
+    if (!currentDeleteId) return;
+    var url = '/imported-files/' + currentDeleteId + '/delete?with_transactions=' + (withTransactions ? '1' : '0');
+    deleteModal.style.display = 'none';
 
     try {
       var r    = await fetch(url, { method: 'POST' });
       var data = await r.json();
 
       if (data.ok) {
-        // Remove the row from the table
-        var row = document.getElementById('file-row-' + currentId);
+        var row = document.getElementById('file-row-' + currentDeleteId);
         if (row) row.remove();
 
-        // If table is now empty, show the empty state row
         var tbody = document.getElementById('files-tbody');
         if (tbody && tbody.querySelectorAll('tr').length === 0) {
           var emptyRow = document.createElement('tr');
@@ -155,20 +279,356 @@
           tbody.appendChild(emptyRow);
         }
 
-        // Toast
         if (withTransactions && data.transactions_deleted > 0) {
-          toastMsg.textContent = 'Fichier supprimé — ' + data.transactions_deleted + ' transaction(s) supprimée(s).';
+          showToast('Fichier supprimé — ' + data.transactions_deleted + ' transaction(s) supprimée(s).', true);
         } else {
-          toastMsg.textContent = 'Fichier supprimé.';
+          showToast('Fichier supprimé.', true);
         }
-        toast.style.display = 'flex';
-        setTimeout(function () { toast.style.display = 'none'; }, 4000);
       } else {
-        alert('Erreur : ' + (data.error || 'Suppression échouée'));
+        showToast('Erreur : ' + (data.error || 'Suppression échouée'), false);
       }
     } catch (e) {
-      alert('Erreur réseau : ' + e.message);
+      showToast('Erreur réseau : ' + e.message, false);
     }
+  }
+
+  // ── Reparse ─────────────────────────────────────────────────────────────────
+  document.querySelectorAll('.reparse-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      currentReparseId = btn.dataset.id;
+      reparseFilename.textContent = btn.dataset.filename;
+      reparseModal.style.display = 'flex';
+    });
+  });
+
+  btnCancelReparse.addEventListener('click', function () { reparseModal.style.display = 'none'; });
+  reparseModal.addEventListener('click', function (e) {
+    if (e.target === reparseModal) reparseModal.style.display = 'none';
+  });
+
+  btnConfirmReparse.addEventListener('click', function () { doReparse(); });
+
+  async function doReparse() {
+    if (!currentReparseId) return;
+    reparseModal.style.display = 'none';
+
+    try {
+      var r    = await fetch('/imported-files/' + currentReparseId + '/reparse', { method: 'POST' });
+      var data = await r.json();
+
+      if (data.ok) {
+        if (data.added > 0) {
+          showToast(data.added + ' transaction(s) ajoutée(s), ' + data.skipped + ' déjà présente(s).', true);
+        } else {
+          showToast('Aucune transaction manquante — tout est déjà à jour.', true);
+        }
+      } else {
+        showToast('Erreur : ' + (data.error || 'Réanalyse échouée'), false);
+      }
+    } catch (e) {
+      showToast('Erreur réseau : ' + e.message, false);
+    }
+  }
+})();
+</script>
+
+<!-- ── Import modal JS ─────────────────────────────────────────────────────── -->
+<script>
+(function () {
+  var modal   = document.getElementById('import-modal');
+  var btnOpen = document.getElementById('btn-import');
+  var btnClose = document.getElementById('im-close');
+  var anyImported = false;
+
+  function openModal()  { modal.style.display = 'flex'; }
+  function closeModal() {
+    modal.style.display = 'none';
+    if (anyImported) window.location.reload();
+  }
+
+  btnOpen.addEventListener('click', openModal);
+  btnClose.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+  /* ── Queue ────────────────────────────────────────────────────────────── */
+  var queue  = [];
+  var nextId = 0;
+
+  var dropTarget    = document.getElementById('im-drop-target');
+  var fileInput     = document.getElementById('im-file-input');
+  var queueCard     = document.getElementById('im-file-queue');
+  var fileList      = document.getElementById('im-file-list');
+  var fileCount     = document.getElementById('im-file-count');
+  var btnAnalyzeAll = document.getElementById('im-btn-analyze-all');
+  var btnDeleteAll  = document.getElementById('im-btn-delete-all');
+
+  dropTarget.addEventListener('click', function () { fileInput.click(); });
+  dropTarget.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    dropTarget.style.borderColor = '#4f46e5';
+    dropTarget.style.backgroundColor = 'rgba(79,70,229,0.05)';
+  });
+  dropTarget.addEventListener('dragleave', function () {
+    dropTarget.style.borderColor = '';
+    dropTarget.style.backgroundColor = '';
+  });
+  dropTarget.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dropTarget.style.borderColor = '';
+    dropTarget.style.backgroundColor = '';
+    addFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', function () { addFiles(fileInput.files); fileInput.value = ''; });
+  btnAnalyzeAll.addEventListener('click', analyzeAll);
+  btnDeleteAll.addEventListener('click', deleteAll);
+
+  function addFiles(files) {
+    Array.from(files).forEach(function (f) {
+      if (!f.name.toLowerCase().endsWith('.pdf')) return;
+      var item = { id: nextId++, file: f, status: 'pending', el: null };
+      item.el = buildRow(item);
+      queue.push(item);
+      fileList.appendChild(item.el);
+    });
+    refresh();
+  }
+
+  function removeItem(id) {
+    var idx = queue.findIndex(function (i) { return i.id === id; });
+    if (idx === -1) return;
+    queue[idx].el.remove();
+    queue.splice(idx, 1);
+    refresh();
+  }
+
+  function deleteAll() {
+    queue.filter(function (i) { return i.status !== 'imported'; })
+         .forEach(function (i) { i.el.remove(); });
+    queue = queue.filter(function (i) { return i.status === 'imported'; });
+    refresh();
+  }
+
+  function refresh() {
+    queueCard.style.display = queue.length ? '' : 'none';
+    fileCount.textContent = queue.length + ' fichier(s)';
+    var hasPending = queue.some(function (i) { return i.status === 'pending' || i.status === 'error'; });
+    btnAnalyzeAll.disabled = !hasPending;
+    btnAnalyzeAll.style.opacity = hasPending ? '1' : '0.4';
+    btnAnalyzeAll.style.cursor  = hasPending ? 'pointer' : 'not-allowed';
+  }
+
+  /* ── Row builder ──────────────────────────────────────────────────────── */
+  function buildRow(item) {
+    var kb  = Math.round(item.file.size / 1024);
+    var row = document.createElement('div');
+    row.className = 'rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700';
+    row.innerHTML =
+      '<div class="flex items-center gap-3 p-3">' +
+        '<div class="item-status-icon w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style="background:#f3f4f6">' +
+          '<i class="fas fa-file-pdf text-sm" style="color:#9ca3af"></i>' +
+        '</div>' +
+        '<div class="flex-1 min-w-0">' +
+          '<p class="text-sm font-medium truncate text-gray-900 dark:text-white">' + esc(item.file.name) + '</p>' +
+          '<p class="item-status-text text-xs mt-0.5 text-gray-500 dark:text-gray-300">' + kb + ' Ko — En attente</p>' +
+        '</div>' +
+        '<div class="flex items-center gap-1">' +
+          '<button class="btn-analyze w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-gray-400" title="Analyser et importer">' +
+            '<i class="fas fa-magnifying-glass text-xs"></i>' +
+          '</button>' +
+          '<button class="btn-del w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400" title="Supprimer">' +
+            '<i class="fas fa-trash-can text-xs"></i>' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="item-detail border-t border-gray-200 dark:border-slate-700 px-4 py-3" style="display:none"></div>';
+
+    var btnA = row.querySelector('.btn-analyze');
+    btnA.addEventListener('click', function () { analyzeOne(item); });
+    btnA.addEventListener('mouseenter', function () { btnA.style.color = '#2563eb'; btnA.style.background = 'rgba(37,99,235,0.08)'; });
+    btnA.addEventListener('mouseleave', function () { btnA.style.color = ''; btnA.style.background = ''; });
+
+    var btnD = row.querySelector('.btn-del');
+    btnD.addEventListener('click', function () { removeItem(item.id); });
+    btnD.addEventListener('mouseenter', function () { btnD.style.color = '#dc2626'; btnD.style.background = 'rgba(239,68,68,0.12)'; });
+    btnD.addEventListener('mouseleave', function () { btnD.style.color = ''; btnD.style.background = ''; });
+
+    return row;
+  }
+
+  /* ── Status ───────────────────────────────────────────────────────────── */
+  var STATUS = {
+    pending:   { bg: '#f3f4f6', ic: '#9ca3af', cls: 'fas fa-file-pdf',          text: function (i) { return Math.round(i.file.size / 1024) + ' Ko — En attente'; } },
+    analyzing: { bg: '#dbeafe', ic: '#3b82f6', cls: 'fas fa-spinner fa-spin',   text: function ()  { return 'Analyse en cours…'; } },
+    reparsing: { bg: '#e0e7ff', ic: '#6366f1', cls: 'fas fa-spinner fa-spin',   text: function ()  { return 'Recherche des transactions manquantes…'; } },
+    importing: { bg: '#e0e7ff', ic: '#6366f1', cls: 'fas fa-spinner fa-spin',   text: function ()  { return 'Importation en cours…'; } },
+    imported:  { bg: '#d1fae5', ic: '#059669', cls: 'fas fa-check-double',      text: function (i) { return i._info || 'Importé'; } },
+    duplicate: { bg: '#fef3c7', ic: '#f59e0b', cls: 'fas fa-clock-rotate-left', text: function ()  { return 'Déjà importé — réanalyse disponible'; } },
+    error:     { bg: '#fee2e2', ic: '#ef4444', cls: 'fas fa-xmark',             text: function ()  { return 'Importation échouée — non sauvegardé'; } },
+  };
+
+  function setStatus(item, status, detailHtml) {
+    item.status = status;
+    var cfg = STATUS[status];
+    item.el.querySelector('.item-status-icon').style.background = cfg.bg;
+    item.el.querySelector('.item-status-icon').innerHTML =
+      '<i class="' + cfg.cls + ' text-sm" style="color:' + cfg.ic + '"></i>';
+    item.el.querySelector('.item-status-text').textContent = cfg.text(item);
+    var btnA = item.el.querySelector('.btn-analyze');
+    var btnD = item.el.querySelector('.btn-del');
+    btnA.style.display = (status === 'pending' || status === 'error') ? '' : 'none';
+    btnD.style.display = (status === 'importing' || status === 'imported' || status === 'reparsing') ? 'none' : '';
+    var detail = item.el.querySelector('.item-detail');
+    if (detailHtml) { detail.innerHTML = detailHtml; detail.style.display = ''; }
+    else { detail.style.display = 'none'; detail.innerHTML = ''; }
+    refresh();
+  }
+
+  /* ── Analyze + Import ─────────────────────────────────────────────────── */
+  async function analyzeOne(item) {
+    if (item.status !== 'pending' && item.status !== 'error') return;
+    setStatus(item, 'analyzing');
+
+    var fd = new FormData();
+    fd.append('file', item.file);
+
+    var data;
+    try {
+      var r = await fetch('/upload/analyze', { method: 'POST', body: fd });
+      data  = await r.json();
+    } catch (e) {
+      setStatus(item, 'error', errHtml(e.message));
+      return;
+    }
+
+    if (!data.ok) {
+      if (data.duplicate) {
+        setStatus(item, 'duplicate', dupHtml(data.imported_at));
+        var detail = item.el.querySelector('.item-detail');
+        var btnYes = detail.querySelector('.btn-dup-reparse');
+        var btnNo  = detail.querySelector('.btn-dup-skip');
+        if (btnYes) btnYes.addEventListener('click', function () { doReparse(item, data.existing_file_id); });
+        if (btnNo)  btnNo.addEventListener('click',  function () { removeItem(item.id); });
+      } else {
+        setStatus(item, 'error', errHtml(data.error || 'Fichier non reconnu par aucun parseur disponible.'));
+      }
+      return;
+    }
+
+    setStatus(item, 'importing');
+    var params = new URLSearchParams({
+      transactions_json: data.transactions_json,
+      bank_id:           data.bank_id,
+      filename:          data.filename,
+      source_file:       data.source_file,
+      content_hash:      data.content_hash,
+    });
+
+    try {
+      var importRes  = await fetch('/upload/confirm', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    params.toString(),
+      });
+      var importData = await importRes.json();
+      if (importData.ok) {
+        anyImported = true;
+        removeItem(item.id);
+        addSummaryEntry(data, item.file.name, false);
+      } else {
+        setStatus(item, 'error', errHtml(importData.error || 'Erreur inconnue lors de la confirmation.'));
+      }
+    } catch (e) {
+      setStatus(item, 'error', errHtml(e.message));
+    }
+  }
+
+  /* ── Reparse (duplicate case) ─────────────────────────────────────────── */
+  async function doReparse(item, fileId) {
+    setStatus(item, 'reparsing', null);
+    try {
+      var r    = await fetch('/imported-files/' + fileId + '/reparse', { method: 'POST' });
+      var data = await r.json();
+      if (data.ok) {
+        anyImported = true;
+        item._info = data.added > 0
+          ? data.added + ' transaction(s) ajoutée(s), ' + data.skipped + ' déjà présente(s)'
+          : 'Aucune transaction manquante — déjà à jour';
+        setStatus(item, 'imported', null);
+        addSummaryEntry({ bank_name: '', tx_count: data.added, broken_count: 0 }, item.file.name, true);
+      } else {
+        setStatus(item, 'error', errHtml(data.error || 'Erreur de réanalyse'));
+      }
+    } catch (e) {
+      setStatus(item, 'error', errHtml(e.message));
+    }
+  }
+
+  function analyzeAll() {
+    var pending = queue.filter(function (i) { return i.status === 'pending' || i.status === 'error'; });
+    return Promise.all(pending.map(function (i) { return analyzeOne(i); }));
+  }
+
+  /* ── HTML builders ────────────────────────────────────────────────────── */
+  function errHtml(msg) {
+    var lines = String(msg)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/\n/g,'<br>');
+    return '<div style="background:#fee2e2;border-left:4px solid #dc2626;border-radius:8px;padding:0.75rem 1rem;margin-top:4px">' +
+             '<p style="font-weight:700;color:#991b1b;margin:0 0 0.35rem">' +
+               '<i class="fas fa-circle-xmark" style="margin-right:0.4rem"></i>Erreur — importation annulée' +
+             '</p>' +
+             '<p style="font-size:0.875rem;color:#7f1d1d;margin:0 0 0.35rem;line-height:1.55">' + lines + '</p>' +
+             '<p style="font-size:0.8rem;color:#b91c1c;margin:0">' +
+               '<i class="fas fa-shield-halved" style="margin-right:0.3rem"></i>' +
+               'Le fichier n\'a pas été sauvegardé (ni dans la base de données, ni sur le disque).' +
+             '</p>' +
+           '</div>';
+  }
+
+  function dupHtml(importedAt) {
+    return '<div style="background:#fef9c3;border-left:4px solid #f59e0b;border-radius:8px;padding:0.75rem 1rem">' +
+             '<p style="font-weight:700;color:#92400e;margin:0 0 0.35rem">' +
+               '<i class="fas fa-clock-rotate-left" style="margin-right:0.4rem"></i>Fichier déjà importé' +
+             '</p>' +
+             '<p style="font-size:0.875rem;color:#78350f;margin:0 0 0.75rem">' +
+               'Ce relevé a déjà été importé le <strong>' + esc(importedAt) + '</strong>.<br>' +
+               'Voulez-vous rechercher les transactions manquantes ou supprimées par erreur ?' +
+             '</p>' +
+             '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">' +
+               '<button class="btn-dup-reparse btn-primary" style="font-size:0.8rem;padding:0.35rem 0.85rem">' +
+                 '<i class="fas fa-rotate" style="margin-right:0.3rem"></i>Oui — rechercher les transactions manquantes' +
+               '</button>' +
+               '<button class="btn-dup-skip btn-secondary" style="font-size:0.8rem;padding:0.35rem 0.85rem">Non, ignorer</button>' +
+             '</div>' +
+           '</div>';
+  }
+
+  function addSummaryEntry(data, originalName, isReparse) {
+    var summary = document.getElementById('im-import-summary');
+    var list    = document.getElementById('im-summary-list');
+    var label;
+    if (isReparse) {
+      label = data.tx_count > 0
+        ? '<span style="color:#16a34a;font-weight:600">' + data.tx_count + ' transaction(s) récupérée(s)</span>'
+        : '<span style="color:#6b7280">Aucune transaction manquante</span>';
+    } else {
+      var broken = data.broken_count > 0
+        ? ' <span style="color:#d97706">(' + data.broken_count + ' incomplète(s))</span>' : '';
+      label = '<span style="color:#16a34a;font-weight:600">' + data.tx_count + ' transaction(s) importée(s)</span>' + broken;
+    }
+    var bankLabel = (!isReparse && data.bank_name) ? esc(data.bank_name) + ' — ' : '';
+    var entry = document.createElement('div');
+    entry.className = 'flex items-start gap-2 text-sm';
+    entry.innerHTML =
+      '<i class="fas fa-file-pdf text-red-400 mt-0.5 flex-shrink-0"></i>' +
+      '<span class="text-gray-700 dark:text-gray-300">' + esc(originalName) + ' — ' + bankLabel + label + '</span>';
+    list.appendChild(entry);
+    summary.style.display = '';
+  }
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 })();
 </script>

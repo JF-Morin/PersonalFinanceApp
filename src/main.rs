@@ -115,13 +115,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/transactions/manual",     post(handlers::transactions::post_manual_transaction))
         // Imports
         .route("/imported-files",          get(handlers::imports::get_imported_files))
-        .route("/imported-files/:id/delete", post(handlers::imports::post_delete_imported_file))
-        .route("/upload",                  get(handlers::imports::get_upload)
-                                          .post(handlers::imports::post_upload))
+        .route("/imported-files/:id/delete",  post(handlers::imports::post_delete_imported_file))
+        .route("/imported-files/:id/reparse", post(handlers::imports::post_reparse_imported_file))
         .route("/upload/analyze",          post(handlers::imports::post_analyze))
         .route("/upload/confirm",          post(handlers::imports::post_confirm_import))
+        .route("/404-not-found",           get(handlers::get_not_found))
         // Static files
         .nest_service("/static", ServeDir::new("static"))
+        // 404 fallback for undefined routes
+        .fallback(handlers::handler_404)
         // HTTP request/response tracing — logs method, path, status, latency
         .layer(
             TraceLayer::new_for_http()
