@@ -167,6 +167,7 @@ async fn confirm_import_inner(
         .await?;
     }
 
+    state.events.send(crate::sse::AppEvent { kind: "imports", actor_id: user_id });
     tracing::info!(
         file_id      = %file_id,
         filename     = %form.filename,
@@ -411,7 +412,7 @@ async fn delete_file_inner(
     file_id: i64,
     params: &DeleteFileParams,
 ) -> AppResult<axum::response::Response> {
-    let _user_id = super::get_user_id(&jar)?;
+    let user_id = super::get_user_id(&jar)?;
 
     let with_transactions = params
         .with_transactions
@@ -469,6 +470,7 @@ async fn delete_file_inner(
         ),
     }
 
+    state.events.send(crate::sse::AppEvent { kind: "imports", actor_id: user_id });
     tracing::info!(
         file_id              = %file_id,
         filename             = %filename,
@@ -580,6 +582,7 @@ async fn reparse_inner(
         added += 1;
     }
 
+    state.events.send(crate::sse::AppEvent { kind: "imports", actor_id: user_id });
     tracing::info!(
         file_id  = %file_id,
         user_id  = %user_id,

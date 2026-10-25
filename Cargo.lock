@@ -1495,6 +1495,7 @@ dependencies = [
  "tera",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "tower-http 0.5.2",
  "tracing",
  "tracing-appender",
@@ -2750,6 +2751,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

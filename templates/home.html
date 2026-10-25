@@ -155,5 +155,11 @@ document.addEventListener('visibilitychange', function () {
     refreshChart();
   }
 });
+
+// SSE: refresh balances (and chart on transaction events) when any user changes data
+window.__appChangeHandler = function(evt) {
+  refreshBalances();
+  if (evt.kind === 'transactions') refreshChart();
+};
 </script>
 {% endblock %}

@@ -192,6 +192,7 @@ pub async fn post_update_transaction(
 
     let is_complete = recalculate_status(&state.db, id).await?;
 
+    state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
     tracing::info!(id=%id, user_id=%user_id, is_complete=%is_complete, is_foreign=%is_foreign, "Transaction updated");
 
     Ok(Json(serde_json::json!({ "ok": true, "complete": is_complete })).into_response())
@@ -228,6 +229,7 @@ async fn delete_transaction_inner(state: &AppState, jar: &CookieJar, id: i64) ->
         .execute(&state.db)
         .await?;
 
+    state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
     tracing::info!(id=%id, user_id=%user_id, "Transaction deleted");
     Ok(())
 }
@@ -330,6 +332,7 @@ pub async fn post_manual_transaction(
     .fetch_one(&state.db)
     .await?;
 
+    state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
     tracing::info!(user_id=%user_id, tx_id=%new_tx_id, is_foreign=%is_foreign, "Manual transaction added");
 
     if is_htmx(&headers) {
@@ -390,6 +393,7 @@ pub async fn post_transaction_share(
     let shares = get_transaction_shares(&state.db, tx_id).await?;
     let is_complete = recalculate_status(&state.db, tx_id).await?;
 
+    state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
     tracing::info!(tx_id=%tx_id, user_id=%form.user_id, share=%form.share, "Share upserted");
 
     Ok(Json(serde_json::json!({ "ok": true, "shares": shares, "complete": is_complete })))
@@ -420,6 +424,7 @@ pub async fn delete_transaction_share(
     let shares = get_transaction_shares(&state.db, tx_id).await?;
     let is_complete = recalculate_status(&state.db, tx_id).await?;
 
+    state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
     tracing::info!(tx_id=%tx_id, share_user_id=%share_user_id, "Share removed");
 
     Ok(Json(serde_json::json!({ "ok": true, "shares": shares, "complete": is_complete })))

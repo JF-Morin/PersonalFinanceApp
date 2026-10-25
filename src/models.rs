@@ -40,39 +40,6 @@ pub struct Category {
     pub name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
-pub struct TransactionStatus {
-    pub id: i64,
-    pub name: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
-pub struct ImportedFile {
-    pub id: i64,
-    pub filename: String,
-    pub bank_id: i64,
-    pub source_file: String,
-    pub imported_at: String,
-    pub row_count: i64,
-    pub importer_id: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
-pub struct Transaction {
-    pub id: i64,
-    pub date: String,
-    pub transaction_date: String,
-    pub operation: String,
-    pub amount: f64,
-    pub currency_id: i64,
-    pub category_id: Option<i64>,
-    pub owner_id: i64,
-    pub status_id: i64,
-    pub from_file_id: i64,
-    pub notes: Option<String>,
-    pub foreign_currency_amount: Option<f64>,
-    pub foreign_currency_id: Option<i64>,
-}
 
 /// Intermediate struct produced by parsers before DB insertion.
 #[derive(Debug, Serialize, Deserialize, Clone)]

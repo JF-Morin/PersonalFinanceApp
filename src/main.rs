@@ -18,6 +18,7 @@ mod error;
 mod handlers;
 mod models;
 mod parsers;
+mod sse;
 
 use config::Config;
 use db::DbPool;
@@ -27,6 +28,7 @@ pub struct AppState {
     pub db: DbPool,
     pub config: Arc<Config>,
     pub tera: Arc<Tera>,
+    pub events: Arc<sse::EventBus>,
 }
 
 #[tokio::main]
@@ -91,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
         db,
         config: Arc::new(config.clone()),
         tera: Arc::new(tera),
+        events: Arc::new(sse::EventBus::new()),
     };
 
     // ── Router ─────────────────────────────────────────────────────────────────
@@ -122,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/upload/analyze",          post(handlers::imports::post_analyze))
         .route("/upload/confirm",          post(handlers::imports::post_confirm_import))
         .route("/404-not-found",           get(handlers::get_not_found))
+        .route("/events",                  get(sse::get_events))
         // Static files
         .nest_service("/static", ServeDir::new("static"))
         // 404 fallback for undefined routes

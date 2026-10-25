@@ -12,8 +12,6 @@ pub enum AppError {
     Template(#[from] tera::Error),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Not found")]
-    NotFound,
     #[error("Unauthorized")]
     Unauthorized,
     #[error("{0}")]
@@ -31,7 +29,6 @@ impl IntoResponse for AppError {
         match self {
             // Redirect rather than 401 — this is an HTML app, not a JSON API.
             AppError::Unauthorized => Redirect::to("/login?unauthorized=1").into_response(),
-            AppError::NotFound => (StatusCode::NOT_FOUND, "Not found").into_response(),
             e => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
     }

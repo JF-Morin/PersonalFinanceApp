@@ -33,6 +33,22 @@
   <i class="fas fa-check-circle"></i><span id="tx-toast-msg"></span>
 </div>
 
+<!-- SSE notification banner -->
+<div id="sse-banner"
+     style="display:none;position:fixed;top:1.5rem;right:1.5rem;z-index:1000"
+     class="bg-blue-600 text-white font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
+  <i class="fas fa-arrows-rotate"></i>
+  <span>Des modifications ont été apportées.</span>
+  <button onclick="window.location.reload()"
+          style="background:transparent;border:none;color:white;cursor:pointer;font-weight:700;text-decoration:underline;font-size:inherit">
+    Actualiser
+  </button>
+  <button onclick="document.getElementById('sse-banner').style.display='none'"
+          style="background:transparent;border:none;color:white;cursor:pointer;opacity:0.7;margin-left:0.25rem">
+    <i class="fas fa-times"></i>
+  </button>
+</div>
+
 <style>
 @keyframes carouselInRight {
   from { opacity: 0; transform: translateX(36px); }
@@ -1434,5 +1450,20 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 })();
+
+// SSE: refresh transaction list when another user changes data
+window.__appChangeHandler = function(evt) {
+  if (evt.actor_id === CURRENT_USER_ID) return;
+  var modals = ['import-modal', 'carousel-overlay', 'edit-modal', 'del-modal', 'manual-modal'];
+  var modalOpen = modals.some(function(id) {
+    var el = document.getElementById(id);
+    return el && el.style.display !== 'none';
+  });
+  if (modalOpen) {
+    document.getElementById('sse-banner').style.display = 'flex';
+  } else {
+    htmx.ajax('GET', '/transactions', { target: '#tx-tbody', swap: 'innerHTML' });
+  }
+};
 </script>
 {% endblock %}

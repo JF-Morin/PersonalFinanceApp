@@ -368,5 +368,21 @@ function setActiveNav() {
 setActiveNav();
 document.addEventListener('htmx:afterSettle', setActiveNav);
 </script>
+
+<script>
+var CURRENT_USER_ID = {% if current_user %}{{ current_user.id }}{% else %}null{% endif %};
+(function() {
+  if (!CURRENT_USER_ID) return;
+  if (window._sse && window._sse.readyState !== EventSource.CLOSED) return;
+  window._sse = new EventSource('/events');
+  window._sse.onmessage = function(e) {
+    var evt;
+    try { evt = JSON.parse(e.data); } catch(_) { return; }
+    if (typeof window.__appChangeHandler === 'function') {
+      window.__appChangeHandler(evt);
+    }
+  };
+})();
+</script>
 </body>
 </html>
