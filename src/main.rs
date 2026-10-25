@@ -112,6 +112,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/transactions",            get(handlers::transactions::get_transactions))
         .route("/transactions/:id/update", post(handlers::transactions::post_update_transaction))
         .route("/transactions/:id/delete", post(handlers::transactions::post_delete_transaction))
+        .route("/transactions/:id/shares", post(handlers::transactions::post_transaction_share))
+        .route("/transactions/:id/shares/:user_id", delete(handlers::transactions::delete_transaction_share))
         .route("/transactions/manual",     post(handlers::transactions::post_manual_transaction))
         // Imports
         .route("/imported-files",          get(handlers::imports::get_imported_files))

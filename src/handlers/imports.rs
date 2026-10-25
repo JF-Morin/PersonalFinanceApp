@@ -151,7 +151,7 @@ async fn confirm_import_inner(
     for tx in &transactions {
         let status_id: i64 = if tx.parse_note.is_some() { 3 } else { 1 };
         sqlx::query(
-            "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, paid_by, status_id, from_file_id, parse_note)
+            "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, owner_id, status_id, from_file_id, parse_note)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&tx.date)
@@ -563,7 +563,7 @@ async fn reparse_inner(
         let status_id: i64 = if tx.parse_note.is_some() { 3 } else { 1 };
         sqlx::query(
             "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, \
-             paid_by, status_id, from_file_id, parse_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             owner_id, status_id, from_file_id, parse_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&tx.date)
         .bind(&tx.transaction_date)
