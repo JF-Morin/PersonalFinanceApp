@@ -144,6 +144,12 @@
   width: 9rem;
   flex-shrink: 0;
 }
+
+/* ── Share inline list ──────────────────────────────────────────────── */
+.share-inline-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.share-inline-row  { display: flex; align-items: center; gap: 0.75rem; }
+.share-inline-label { flex: 1; min-width: 0; }
+.share-inline-input { width: 7rem; text-align: right; flex-shrink: 0; }
 </style>
 
 <!-- ── Import modal ───────────────────────────────────────────────────────── -->
@@ -265,19 +271,19 @@
             Participants
             <span id="c-shares-total" class="text-xs font-normal ml-1" style="color:#f59e0b">(0%)</span>
           </label>
-          <div id="c-shares-list" class="flex flex-wrap gap-1.5 min-h-6 mb-2"></div>
-          <div class="share-add-row">
-            <select id="c-share-user" class="input text-sm share-row-select">
-              {% for u in users %}
-              <option value="{{ u.id }}">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</option>
-              {% endfor %}
-            </select>
-            <input id="c-share-pct" type="number" min="1" max="100" step="1"
-                   class="input text-sm share-row-input" placeholder="50">
-            <button id="c-share-add" type="button" class="btn-primary"
-                    style="padding:0.4rem 0.6rem;font-size:0.875rem">
-              <i class="fas fa-plus"></i>
-            </button>
+          <div id="c-shares-list" class="share-inline-list">
+            {% for u in users %}{% if u.id == current_user.id %}
+            <div class="share-inline-row">
+              <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %} <span class="text-xs text-indigo-500 font-medium">(vous)</span></span>
+              <input type="number" min="0" max="100" step="0.5" class="input text-sm share-inline-input" data-user-id="{{ u.id }}" placeholder="0">
+            </div>
+            {% endif %}{% endfor %}
+            {% for u in users %}{% if u.id != current_user.id %}
+            <div class="share-inline-row">
+              <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span>
+              <input type="number" min="0" max="100" step="0.5" class="input text-sm share-inline-input" data-user-id="{{ u.id }}" placeholder="0">
+            </div>
+            {% endif %}{% endfor %}
           </div>
           <p id="c-share-error" class="text-xs text-red-500 mt-1" style="display:none"></p>
         </div>
@@ -308,7 +314,13 @@
 <div id="edit-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px)"
      class="flex items-center justify-center p-4">
   <div class="card max-w-3xl w-full">
-    <h2 class="text-lg font-semibold mb-4">Modifier la transaction</h2>
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold">Modifier la transaction</h2>
+      <button type="button" id="edit-close"
+              class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-700 border-none bg-transparent cursor-pointer">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
     <form id="edit-form" class="grid grid-cols-2 gap-3">
       <input type="hidden" id="edit-tx-id">
       <div>
@@ -351,28 +363,24 @@
           Participants
           <span id="edit-shares-total" class="text-xs font-normal ml-1" style="color:#f59e0b">(0%)</span>
         </label>
-        <div id="edit-shares-list" class="flex flex-wrap gap-1.5 min-h-6 mb-2"></div>
-        <div class="share-add-row">
-          <select id="edit-share-user" class="input text-sm share-row-select">
-            {% for u in users %}
-            <option value="{{ u.id }}">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</option>
-            {% endfor %}
-          </select>
-          <input id="edit-share-pct" type="number" min="1" max="100" step="1"
-                 class="input text-sm share-row-input" placeholder="50">
-          <button id="edit-share-add" type="button" class="btn-primary"
-                  style="padding:0.4rem 0.6rem;font-size:0.875rem">
-            <i class="fas fa-plus"></i>
-          </button>
+        <div id="edit-shares-list" class="share-inline-list">
+          {% for u in users %}{% if u.id == current_user.id %}
+          <div class="share-inline-row">
+            <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %} <span class="text-xs text-indigo-500 font-medium">(vous)</span></span>
+            <input type="number" min="0" max="100" step="0.5" class="input text-sm share-inline-input" data-user-id="{{ u.id }}" placeholder="0">
+          </div>
+          {% endif %}{% endfor %}
+          {% for u in users %}{% if u.id != current_user.id %}
+          <div class="share-inline-row">
+            <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span>
+            <input type="number" min="0" max="100" step="0.5" class="input text-sm share-inline-input" data-user-id="{{ u.id }}" placeholder="0">
+          </div>
+          {% endif %}{% endfor %}
         </div>
         <p id="edit-share-error" class="text-xs text-red-500 mt-1" style="display:none"></p>
       </div>
 
-      <div id="edit-error" class="col-span-2 text-red-500 text-sm" style="display:none"></div>
-      <div class="col-span-2 flex gap-2 justify-end mt-1">
-        <button type="button" id="edit-cancel" class="btn-secondary">Annuler</button>
-        <button type="submit" class="btn-primary"><i class="fas fa-save mr-1"></i> Enregistrer</button>
-      </div>
+      <div id="edit-save-status" class="col-span-2 text-sm text-right h-5" style="color:#9ca3af"></div>
     </form>
   </div>
 </div>
@@ -469,19 +477,19 @@
           Participants
           <span id="manual-shares-total" class="text-xs font-normal ml-1" style="color:#f59e0b">(0%)</span>
         </label>
-        <div id="manual-shares-list" class="flex flex-wrap gap-1.5 min-h-6 mb-2"></div>
-        <div class="share-add-row">
-          <select id="manual-share-user" class="input text-sm share-row-select">
-            {% for u in users %}
-            <option value="{{ u.id }}">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</option>
-            {% endfor %}
-          </select>
-          <input id="manual-share-pct" type="number" min="1" max="100" step="1"
-                 class="input text-sm share-row-input" placeholder="50">
-          <button id="manual-share-add" type="button" class="btn-primary"
-                  style="padding:0.4rem 0.6rem;font-size:0.875rem">
-            <i class="fas fa-plus"></i>
-          </button>
+        <div id="manual-shares-list" class="share-inline-list">
+          {% for u in users %}{% if u.id == current_user.id %}
+          <div class="share-inline-row">
+            <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %} <span class="text-xs text-indigo-500 font-medium">(vous)</span></span>
+            <input type="number" min="0" max="100" step="0.5" class="input text-sm share-inline-input" data-user-id="{{ u.id }}" placeholder="0">
+          </div>
+          {% endif %}{% endfor %}
+          {% for u in users %}{% if u.id != current_user.id %}
+          <div class="share-inline-row">
+            <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span>
+            <input type="number" min="0" max="100" step="0.5" class="input text-sm share-inline-input" data-user-id="{{ u.id }}" placeholder="0">
+          </div>
+          {% endif %}{% endfor %}
         </div>
         <p id="manual-share-error" class="text-xs text-red-500 mt-1" style="display:none"></p>
       </div>
@@ -627,91 +635,68 @@
   styleTag.textContent = '.year-btn.active-year{background-color:#4f46e5!important;color:white!important;}';
   document.head.appendChild(styleTag);
 
-  /* ── Share user-select helpers ───────────────────────────────────────── */
-  function captureUsers(selectEl) {
-    return Array.from(selectEl.options).map(function (o) { return { value: o.value, text: o.text }; });
+  /* ── Share inline helpers ────────────────────────────────────────────── */
+  function updateShareMaxes(container) {
+    var inputs = Array.from(container.querySelectorAll('.share-inline-input'));
+    inputs.forEach(function(inp) {
+      var sumOthers = inputs.reduce(function(acc, i) {
+        return acc + (i !== inp ? (parseFloat(i.value) || 0) : 0);
+      }, 0);
+      inp.max = Math.max(0, Math.round((100 - sumOthers) * 10) / 10);
+    });
   }
 
-  function syncUserDropdown(selectEl, shares, allUsers) {
-    var sharedIds = new Set((shares || []).map(function (s) { return String(s.user_id); }));
-    var prev = selectEl.value;
-    selectEl.innerHTML = '';
-    allUsers.forEach(function (u) {
-      if (!sharedIds.has(u.value)) {
-        var opt = document.createElement('option');
-        opt.value = u.value;
-        opt.textContent = u.text;
-        selectEl.appendChild(opt);
-      }
-    });
-    if (!sharedIds.has(String(prev))) selectEl.value = prev;
-  }
-
-  /* ── Share pills renderer ─────────────────────────────────────────────── */
-  function renderSharePills(shares, listEl, totalEl, txId, onRemove, addControls) {
-    listEl.innerHTML = '';
-    var total = 0;
-    (shares || []).forEach(function (s) {
-      total += s.share;
-      var pill = document.createElement('span');
-      pill.className = 'share-pill';
-
-      var circle = document.createElement('span');
-      circle.className = 'share-pill-circle';
-      circle.textContent = s.initials;
-
-      var pct = document.createElement('span');
-      pct.className = 'share-pill-pct';
-      pct.textContent = s.share.toFixed(1) + '%';
-
-      pill.appendChild(circle);
-      pill.appendChild(pct);
-
-      if (onRemove) {
-        var rm = document.createElement('button');
-        rm.type = 'button';
-        rm.title = 'Retirer';
-        rm.className = 'share-pill-rm';
-        rm.textContent = '×';
-        rm.onclick = (function (uid) { return function () { onRemove(uid); }; })(s.user_id);
-        pill.appendChild(rm);
-      }
-      listEl.appendChild(pill);
-    });
-
+  function updateShareTotal(totalElId, container) {
+    var inputs = Array.from(container.querySelectorAll('.share-inline-input'));
+    var total  = inputs.reduce(function(acc, i) { return acc + (parseFloat(i.value) || 0); }, 0);
+    var el     = document.getElementById(totalElId);
+    if (!el) return total;
     var pct = Math.round(total * 10) / 10;
-    totalEl.textContent = '(' + (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%)';
-    totalEl.style.color = Math.abs(total - 100) < 0.01 ? '#16a34a' : '#f59e0b';
-    if (addControls) {
-      if (addControls.allUsers) syncUserDropdown(addControls.user, shares, addControls.allUsers);
-      var full = Math.abs(total - 100) < 0.01;
-      addControls.user.disabled     = full;
-      addControls.pct.disabled      = full;
-      addControls.btn.disabled      = full;
-      addControls.btn.style.opacity = full ? '0.4' : '';
-      addControls.btn.style.cursor  = full ? 'not-allowed' : '';
-    }
+    el.textContent = '(' + (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%)';
+    el.style.color  = Math.abs(total - 100) < 0.01 ? '#16a34a' : '#f59e0b';
     return total;
   }
 
-  /* ── Edit modal ───────────────────────────────────────────────────────── */
-  var editModal    = document.getElementById('edit-modal');
-  var editForm     = document.getElementById('edit-form');
-  var editError    = document.getElementById('edit-error');
-  var editCancel   = document.getElementById('edit-cancel');
-  var editTxId     = null;
-  var editShares   = [];
+  function fillShareInputs(container, shares) {
+    container.querySelectorAll('.share-inline-input').forEach(function(inp) {
+      var uid      = String(inp.dataset.userId);
+      var existing = (shares || []).find(function(s) { return String(s.user_id) === uid; });
+      inp.value    = existing ? existing.share : '';
+      inp.dataset.prevValue = inp.value;
+    });
+    updateShareMaxes(container);
+  }
 
-  var editShareCtrl   = { user: document.getElementById('edit-share-user'),   pct: document.getElementById('edit-share-pct'),   btn: document.getElementById('edit-share-add')   };
-  var cShareCtrl      = { user: document.getElementById('c-share-user'),       pct: document.getElementById('c-share-pct'),       btn: document.getElementById('c-share-add')       };
-  var manualShareCtrl = { user: document.getElementById('manual-share-user'),  pct: document.getElementById('manual-share-pct'),  btn: document.getElementById('manual-share-add')  };
-  editShareCtrl.allUsers   = captureUsers(editShareCtrl.user);
-  cShareCtrl.allUsers      = captureUsers(cShareCtrl.user);
-  manualShareCtrl.allUsers = captureUsers(manualShareCtrl.user);
+  async function refreshPendingBadge() {
+    try {
+      var r    = await fetch('/home/stats');
+      var data = await r.json();
+      var count = data.pending_count || 0;
+      var btn = document.getElementById('btn-open-carousel');
+      if (!btn) return;
+      if (count === 0) {
+        btn.innerHTML = '<i class="fas fa-check-circle mr-1"></i> À compléter (0)';
+        btn.disabled = true;
+      } else {
+        btn.innerHTML = '<i class="fas fa-tasks mr-1"></i> À compléter (' + count + ')';
+        btn.disabled = false;
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  /* ── Edit modal ───────────────────────────────────────────────────────── */
+  var editModal     = document.getElementById('edit-modal');
+  var editForm      = document.getElementById('edit-form');
+  var editTxId      = null;
+  var editShares    = [];
+  var editSaveTimer = null;
 
   function openEdit(btn) {
     editTxId  = btn.dataset.id;
     try { editShares = JSON.parse(btn.dataset.shares || '[]'); } catch(e) { editShares = []; }
+    // Prefer PENDING shares if available — they may be more recent than btn.dataset.shares
+    var pEntry = PENDING.find(function(p) { return p.id === parseInt(editTxId, 10); });
+    if (pEntry) editShares = pEntry.shares;
 
     document.getElementById('edit-tx-id').value     = editTxId;
     document.getElementById('edit-date').value      = btn.dataset.date;
@@ -728,96 +713,117 @@
     }
     document.getElementById('edit-category').value  = btn.dataset.categoryId || '';
     document.getElementById('edit-notes').value     = btn.dataset.notes || '';
-    document.getElementById('edit-share-pct').value = '';
     document.getElementById('edit-share-error').style.display = 'none';
-    editError.style.display = 'none';
+    document.getElementById('edit-save-status').textContent = '';
 
-    renderSharePills(
-      editShares,
-      document.getElementById('edit-shares-list'),
-      document.getElementById('edit-shares-total'),
-      editTxId,
-      editRemoveShare,
-      editShareCtrl
-    );
+    var editShareList = document.getElementById('edit-shares-list');
+    fillShareInputs(editShareList, editShares);
+    updateShareTotal('edit-shares-total', editShareList);
 
     editModal.style.display = 'flex';
   }
 
-  async function editAddShare() {
-    if (!editTxId) return;
-    var userId = document.getElementById('edit-share-user').value;
-    var share  = parseFloat(document.getElementById('edit-share-pct').value);
+  function autoSaveEdit() {
+    clearTimeout(editSaveTimer);
+    editSaveTimer = setTimeout(async function() {
+      if (!editTxId) return;
+      var params   = new URLSearchParams(new FormData(editForm));
+      var statusEl = document.getElementById('edit-save-status');
+      statusEl.textContent = '…';
+      statusEl.style.color = '#9ca3af';
+      try {
+        var r    = await fetch('/transactions/' + editTxId + '/update', { method: 'POST', body: params });
+        var data = await r.json();
+        if (data.ok) {
+          statusEl.textContent = '✓ Enregistré';
+          statusEl.style.color = '#16a34a';
+          setTimeout(function() { statusEl.textContent = ''; }, 2000);
+        } else {
+          statusEl.textContent = data.error || 'Erreur';
+          statusEl.style.color = '#ef4444';
+        }
+      } catch(err) {
+        statusEl.textContent = 'Erreur réseau';
+        statusEl.style.color = '#ef4444';
+      }
+    }, 400);
+  }
+
+  editForm.addEventListener('change', function(e) {
+    if (!e.target.name) return;
+    autoSaveEdit();
+  });
+
+  document.getElementById('edit-shares-list').addEventListener('focusin', function(e) {
+    if (e.target.classList.contains('share-inline-input'))
+      e.target.dataset.prevValue = e.target.value;
+  });
+
+  document.getElementById('edit-shares-list').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.classList.contains('share-inline-input')) {
+      e.preventDefault();
+      e.target.blur();
+    }
+  });
+
+  document.getElementById('edit-shares-list').addEventListener('input', function(e) {
+    if (!e.target.classList.contains('share-inline-input')) return;
+    var list = document.getElementById('edit-shares-list');
+    updateShareMaxes(list);
+    updateShareTotal('edit-shares-total', list);
+  });
+
+  document.getElementById('edit-shares-list').addEventListener('change', async function(e) {
+    if (!e.target.classList.contains('share-inline-input') || !editTxId) return;
+    var inp    = e.target;
+    var userId = inp.dataset.userId;
+    var raw    = parseFloat(inp.value) || 0;
+    var max    = parseFloat(inp.max);
     var errEl  = document.getElementById('edit-share-error');
     errEl.style.display = 'none';
-    if (!userId || isNaN(share) || share <= 0 || share > 100) {
-      errEl.textContent = 'Part invalide (0 < part ≤ 100).';
+    var list   = document.getElementById('edit-shares-list');
+
+    if (!isNaN(max) && raw > max + 0.001) {
+      inp.value = inp.dataset.prevValue || '';
+      updateShareMaxes(list);
+      updateShareTotal('edit-shares-total', list);
+      errEl.textContent = 'La somme des parts ne peut pas dépasser 100 %.';
       errEl.style.display = '';
       return;
     }
+
     try {
-      var r = await fetch('/transactions/' + editTxId + '/shares', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ user_id: userId, share: share }),
-      });
-      var data = await r.json();
-      if (data.ok) {
-        editShares = data.shares;
-        document.getElementById('edit-share-pct').value = '';
-        renderSharePills(editShares,
-          document.getElementById('edit-shares-list'),
-          document.getElementById('edit-shares-total'),
-          editTxId, editRemoveShare, editShareCtrl);
+      var r, data;
+      if (raw <= 0) {
+        inp.value = '';
+        r    = await fetch('/transactions/' + editTxId + '/shares/' + userId, { method: 'DELETE' });
+        data = await r.json();
       } else {
-        errEl.textContent = data.error || 'Erreur.';
-        errEl.style.display = '';
+        r    = await fetch('/transactions/' + editTxId + '/shares', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ user_id: userId, share: raw }),
+        });
+        data = await r.json();
       }
-    } catch(e) {
-      document.getElementById('edit-share-error').textContent = 'Erreur réseau.';
-      document.getElementById('edit-share-error').style.display = '';
-    }
-  }
-
-  async function editRemoveShare(userId) {
-    if (!editTxId) return;
-    try {
-      var r    = await fetch('/transactions/' + editTxId + '/shares/' + userId, { method: 'DELETE' });
-      var data = await r.json();
       if (data.ok) {
+        inp.dataset.prevValue = inp.value;
         editShares = data.shares;
-        renderSharePills(editShares,
-          document.getElementById('edit-shares-list'),
-          document.getElementById('edit-shares-total'),
-          editTxId, editRemoveShare, editShareCtrl);
-      }
-    } catch(e) {}
-  }
-
-  document.getElementById('edit-share-add').addEventListener('click', editAddShare);
-  editCancel.addEventListener('click', function () { editModal.style.display = 'none'; });
-  editModal.addEventListener('click', function (e) { if (e.target === editModal) editModal.style.display = 'none'; });
-
-  editForm.addEventListener('submit', async function (e) {
-    e.preventDefault();
-    var id = document.getElementById('edit-tx-id').value;
-    var params = new URLSearchParams(new FormData(editForm));
-    try {
-      var r    = await fetch('/transactions/' + id + '/update', { method: 'POST', body: params });
-      var data = await r.json();
-      if (data.ok) {
-        editModal.style.display = 'none';
-        showToast('Transaction modifiée.');
-        setTimeout(function () { window.location.reload(); }, 800);
-      } else {
-        editError.textContent = data.error || 'Erreur lors de la modification.';
-        editError.style.display = '';
-      }
-    } catch (err) {
-      editError.textContent = 'Erreur réseau : ' + err.message;
-      editError.style.display = '';
+        // Keep carousel PENDING in sync for the same transaction
+        var pIdx = PENDING.findIndex(function(p) { return p.id === parseInt(editTxId, 10); });
+        if (pIdx !== -1) PENDING[pIdx].shares = data.shares;
+        refreshPendingBadge();
+        htmx.ajax('GET', '/transactions', { target: '#tx-tbody', swap: 'innerHTML' });
+      } else { errEl.textContent = data.error || 'Erreur.'; errEl.style.display = ''; }
+    } catch(err) {
+      errEl.textContent = 'Erreur réseau.'; errEl.style.display = '';
     }
+    updateShareMaxes(list);
+    updateShareTotal('edit-shares-total', list);
   });
+
+  document.getElementById('edit-close').addEventListener('click', function() { editModal.style.display = 'none'; });
+  editModal.addEventListener('click', function (e) { if (e.target === editModal) editModal.style.display = 'none'; });
 
   /* ── Delete modal ─────────────────────────────────────────────────────── */
   var delModal   = document.getElementById('del-modal');
@@ -868,50 +874,56 @@
   var manualError  = document.getElementById('manual-error');
   var manualCancel = document.getElementById('manual-cancel');
   var manualDate   = document.getElementById('manual-date');
-  var manualShares = [];
 
-  function manualRenderShares() {
-    renderSharePills(manualShares,
-      document.getElementById('manual-shares-list'),
-      document.getElementById('manual-shares-total'),
-      null,
-      function (userId) {
-        manualShares = manualShares.filter(function (s) { return s.user_id !== userId; });
-        manualRenderShares();
-      },
-      manualShareCtrl
-    );
-  }
+  document.getElementById('manual-shares-list').addEventListener('focusin', function(e) {
+    if (e.target.classList.contains('share-inline-input'))
+      e.target.dataset.prevValue = e.target.value;
+  });
 
-  document.getElementById('manual-share-add').addEventListener('click', function () {
-    var userId = parseInt(document.getElementById('manual-share-user').value, 10);
-    var share  = parseFloat(document.getElementById('manual-share-pct').value);
-    var errEl  = document.getElementById('manual-share-error');
-    errEl.style.display = 'none';
-    if (!userId || isNaN(share) || share <= 0 || share > 100) {
-      errEl.textContent = 'Part invalide (0 < part ≤ 100).';
+  document.getElementById('manual-shares-list').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.classList.contains('share-inline-input')) {
+      e.preventDefault();
+      e.target.blur();
+    }
+  });
+
+  document.getElementById('manual-shares-list').addEventListener('input', function(e) {
+    if (!e.target.classList.contains('share-inline-input')) return;
+    var list = document.getElementById('manual-shares-list');
+    updateShareMaxes(list);
+    updateShareTotal('manual-shares-total', list);
+  });
+
+  document.getElementById('manual-shares-list').addEventListener('change', function(e) {
+    if (!e.target.classList.contains('share-inline-input')) return;
+    var inp  = e.target;
+    var raw  = parseFloat(inp.value) || 0;
+    var max  = parseFloat(inp.max);
+    var list = document.getElementById('manual-shares-list');
+    var errEl = document.getElementById('manual-share-error');
+    if (!isNaN(max) && raw > max + 0.001) {
+      inp.value = inp.dataset.prevValue || '';
+      updateShareMaxes(list);
+      updateShareTotal('manual-shares-total', list);
+      errEl.textContent = 'La somme des parts ne peut pas dépasser 100 %.';
       errEl.style.display = '';
       return;
     }
-    var existing = manualShares.find(function (s) { return s.user_id === userId; });
-    if (existing) { existing.share = share; } else {
-      var sel = document.getElementById('manual-share-user');
-      var name = sel.options[sel.selectedIndex].text;
-      var parts = name.trim().split(' ');
-      var initials = parts.map(function (p) { return p[0] || ''; }).join('').toUpperCase().slice(0, 2);
-      manualShares.push({ user_id: userId, share: share, user_name: name, initials: initials });
-    }
-    document.getElementById('manual-share-pct').value = '';
-    manualRenderShares();
+    inp.dataset.prevValue = inp.value;
+    errEl.style.display = 'none';
+    updateShareMaxes(list);
+    updateShareTotal('manual-shares-total', list);
   });
 
   document.getElementById('btn-add-manual').addEventListener('click', function () {
     manualForm.reset();
-    manualShares = [];
+    var list = document.getElementById('manual-shares-list');
+    list.querySelectorAll('.share-inline-input').forEach(function(inp) { inp.value = ''; });
+    updateShareMaxes(list);
+    updateShareTotal('manual-shares-total', list);
     manualDate.value = new Date().toISOString().slice(0, 10);
     manualError.style.display = 'none';
     document.getElementById('manual-share-error').style.display = 'none';
-    manualRenderShares();
     manualModal.style.display = 'flex';
   });
   manualCancel.addEventListener('click', function () { manualModal.style.display = 'none'; });
@@ -920,12 +932,17 @@
   manualForm.addEventListener('submit', async function (e) {
     e.preventDefault();
     var params = new URLSearchParams(new FormData(manualForm));
+    var sharesFromInputs = [];
+    document.querySelectorAll('#manual-shares-list .share-inline-input').forEach(function(inp) {
+      var share = parseFloat(inp.value);
+      if (share > 0) sharesFromInputs.push({ user_id: parseInt(inp.dataset.userId), share: share });
+    });
     try {
       var r    = await fetch('/transactions/manual', { method: 'POST', body: params });
       var data = await r.json();
       if (data.ok) {
-        if (manualShares.length > 0 && data.id) {
-          await Promise.all(manualShares.map(function (s) {
+        if (sharesFromInputs.length > 0 && data.id) {
+          await Promise.all(sharesFromInputs.map(function (s) {
             return fetch('/transactions/' + data.id + '/shares', {
               method: 'POST',
               headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -944,6 +961,12 @@
       manualError.textContent = 'Erreur réseau : ' + err.message;
       manualError.style.display = '';
     }
+  });
+
+  /* ── Rebuild row list after HTMX tbody swap ──────────────────────────── */
+  document.getElementById('tx-tbody').addEventListener('htmx:afterSwap', function() {
+    ALL_ROWS = Array.from(document.querySelectorAll('#tx-tbody tr[data-date]'));
+    applyFilters();
   });
 
   /* ── Button delegation ────────────────────────────────────────────────── */
@@ -1016,18 +1039,12 @@
 
     document.getElementById('c-category').value = t.category_id || '';
     document.getElementById('c-notes').value     = t.notes || '';
-    document.getElementById('c-share-pct').value = '';
     document.getElementById('c-share-error').style.display = 'none';
     document.getElementById('c-save-status').textContent = '';
 
-    renderSharePills(
-      t.shares || [],
-      document.getElementById('c-shares-list'),
-      document.getElementById('c-shares-total'),
-      t.id,
-      function (userId) { carouselRemoveShare(t.id, userId); },
-      cShareCtrl
-    );
+    var cShareList = document.getElementById('c-shares-list');
+    fillShareInputs(cShareList, t.shares || []);
+    updateShareTotal('c-shares-total', cShareList);
 
     var isSingle = PENDING.length === 1;
     document.getElementById('carousel-footer').style.display = '';
@@ -1036,61 +1053,77 @@
     document.getElementById('c-finish').style.display = isSingle ? ''     : 'none';
   }
 
-  async function carouselAddShare() {
-    if (!PENDING[cIdx]) return;
+  document.getElementById('c-shares-list').addEventListener('focusin', function(e) {
+    if (e.target.classList.contains('share-inline-input'))
+      e.target.dataset.prevValue = e.target.value;
+  });
+
+  document.getElementById('c-shares-list').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.classList.contains('share-inline-input')) {
+      e.preventDefault();
+      e.target.blur();
+    }
+  });
+
+  document.getElementById('c-shares-list').addEventListener('input', function(e) {
+    if (!e.target.classList.contains('share-inline-input')) return;
+    var list = document.getElementById('c-shares-list');
+    updateShareMaxes(list);
+    updateShareTotal('c-shares-total', list);
+  });
+
+  document.getElementById('c-shares-list').addEventListener('change', async function(e) {
+    if (!e.target.classList.contains('share-inline-input') || !PENDING[cIdx]) return;
     var t      = PENDING[cIdx];
-    var userId = document.getElementById('c-share-user').value;
-    var share  = parseFloat(document.getElementById('c-share-pct').value);
+    var inp    = e.target;
+    var userId = inp.dataset.userId;
+    var raw    = parseFloat(inp.value) || 0;
+    var max    = parseFloat(inp.max);
     var errEl  = document.getElementById('c-share-error');
     errEl.style.display = 'none';
-    if (!userId || isNaN(share) || share <= 0 || share > 100) {
-      errEl.textContent = 'Part invalide (0 < part ≤ 100).';
+    var list   = document.getElementById('c-shares-list');
+
+    if (!isNaN(max) && raw > max + 0.001) {
+      inp.value = inp.dataset.prevValue || '';
+      updateShareMaxes(list);
+      updateShareTotal('c-shares-total', list);
+      errEl.textContent = 'La somme des parts ne peut pas dépasser 100 %.';
       errEl.style.display = '';
       return;
     }
+
     try {
-      var r = await fetch('/transactions/' + t.id + '/shares', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ user_id: userId, share: share }),
-      });
-      var data = await r.json();
-      if (data.ok) {
-        PENDING[cIdx].shares = data.shares;
-        document.getElementById('c-share-pct').value = '';
-        renderSharePills(PENDING[cIdx].shares,
-          document.getElementById('c-shares-list'),
-          document.getElementById('c-shares-total'),
-          t.id, function (uid) { carouselRemoveShare(t.id, uid); }, cShareCtrl);
+      var r, data;
+      if (raw <= 0) {
+        inp.value = '';
+        r    = await fetch('/transactions/' + t.id + '/shares/' + userId, { method: 'DELETE' });
+        data = await r.json();
       } else {
-        errEl.textContent = data.error || 'Erreur.';
-        errEl.style.display = '';
+        r    = await fetch('/transactions/' + t.id + '/shares', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ user_id: userId, share: raw }),
+        });
+        data = await r.json();
       }
-    } catch(e) {
-      document.getElementById('c-share-error').textContent = 'Erreur réseau.';
-      document.getElementById('c-share-error').style.display = '';
-    }
-  }
-
-  async function carouselRemoveShare(txId, userId) {
-    var pidx = PENDING.findIndex(function (p) { return p.id === txId; });
-    if (pidx < 0) return;
-    try {
-      var r    = await fetch('/transactions/' + txId + '/shares/' + userId, { method: 'DELETE' });
-      var data = await r.json();
       if (data.ok) {
-        PENDING[pidx].shares = data.shares;
-        if (pidx === cIdx) {
-          renderSharePills(PENDING[cIdx].shares,
-            document.getElementById('c-shares-list'),
-            document.getElementById('c-shares-total'),
-            txId, function (uid) { carouselRemoveShare(txId, uid); }, cShareCtrl);
+        inp.dataset.prevValue = inp.value;
+        PENDING[cIdx].shares = data.shares;
+        // Keep edit modal in sync if it's open for this same transaction
+        if (editTxId && parseInt(editTxId, 10) === t.id) {
+          editShares = data.shares;
+          fillShareInputs(document.getElementById('edit-shares-list'), editShares);
+          updateShareTotal('edit-shares-total', document.getElementById('edit-shares-list'));
         }
-      }
-    } catch(e) {}
-  }
-
-  document.getElementById('c-share-add').addEventListener('click', carouselAddShare);
+        refreshPendingBadge();
+        htmx.ajax('GET', '/transactions', { target: '#tx-tbody', swap: 'innerHTML' });
+      } else { errEl.textContent = data.error || 'Erreur.'; errEl.style.display = ''; }
+    } catch(err) {
+      errEl.textContent = 'Erreur réseau.'; errEl.style.display = '';
+    }
+    updateShareMaxes(list);
+    updateShareTotal('c-shares-total', list);
+  });
 
   async function saveAndNavigate(direction) {
     if (PENDING.length === 0) return;

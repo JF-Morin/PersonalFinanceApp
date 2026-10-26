@@ -130,8 +130,8 @@ async function refreshChart() {
   } catch (e) { /* silent */ }
 }
 
-async function refreshBalances() {
-  htmx.trigger(document.getElementById('balances-content'), 'load');
+function refreshBalances() {
+  htmx.ajax('GET', '/home/balances', { target: '#balances-content', swap: 'innerHTML' });
 }
 
 async function refreshStats() {
@@ -149,7 +149,7 @@ document.getElementById('btn-refresh-balances').addEventListener('click', functi
   var icon = this.querySelector('i');
   icon.classList.add('fa-spin');
   refreshBalances();
-  setTimeout(function () { icon.classList.remove('fa-spin'); }, 800);
+  setTimeout(function () { icon.classList.remove('fa-spin'); }, 600);
 });
 
 document.getElementById('btn-refresh-chart').addEventListener('click', function () {
