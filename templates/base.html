@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="fr" class="{% if is_dark %}dark{% endif %} h-full">
+<html lang="fr" class="{% if is_dark %}dark{% endif %}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Finance Perso{% endblock %}</title>
 
   <link rel="preconnect" href="https://fonts.bunny.net">
-  <link href="https://fonts.bunny.net/css?family=jetbrains-mono:400,500,600,700&display=swap" rel="stylesheet">
+  <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&family=jetbrains-mono:400,500,600,700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -14,17 +14,18 @@
       theme: {
         extend: {
           fontFamily: {
-            sans: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
           },
           fontSize: {
-            'xs':   ['0.9rem',   { lineHeight: '1.25rem' }],
-            'sm':   ['1.05rem',  { lineHeight: '1.5rem'  }],
-            'base': ['1.2rem',   { lineHeight: '1.625rem'}],
-            'lg':   ['1.35rem',  { lineHeight: '1.875rem'}],
-            'xl':   ['1.5rem',   { lineHeight: '2rem'    }],
-            '2xl':  ['1.875rem', { lineHeight: '2.125rem'}],
-            '3xl':  ['2.35rem',  { lineHeight: '2.75rem' }],
-            '4xl':  ['2.875rem', { lineHeight: '1'       }],
+            'xs':   ['0.75rem',  { lineHeight: '1rem'    }],
+            'sm':   ['0.875rem', { lineHeight: '1.25rem' }],
+            'base': ['1rem',     { lineHeight: '1.5rem'  }],
+            'lg':   ['1.125rem', { lineHeight: '1.75rem' }],
+            'xl':   ['1.25rem',  { lineHeight: '1.75rem' }],
+            '2xl':  ['1.5rem',   { lineHeight: '2rem'    }],
+            '3xl':  ['1.875rem', { lineHeight: '2.25rem' }],
+            '4xl':  ['2.25rem',  { lineHeight: '2.5rem'  }],
           },
           colors: {
             primary: {
@@ -43,6 +44,7 @@
     }
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/app.css">
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <style>
@@ -50,12 +52,12 @@
     .nav-link {
       display: flex;
       align-items: center;
-      gap: 1.125rem;
-      padding: 0.625rem 1.125rem;
+      gap: 0.875rem;
+      padding: 0.625rem 1rem;
       border-radius: 0.75rem;
-      font-size: 1.05rem;
+      font-size: 0.9375rem;
       font-weight: 500;
-      color: #4b5563;           /* gray-600 */
+      color: #4b5563;
       transition: background-color 150ms, color 150ms;
       width: 100%;
       text-decoration: none;
@@ -64,96 +66,61 @@
       border: none;
       text-align: left;
     }
-    .dark .nav-link          { color: #d1d5db; }   /* gray-300 */
+    .dark .nav-link { color: #d1d5db; }
 
-    /* Icon accent — always primary even when text is gray */
     .nav-link i {
-      color: #6366f1;           /* primary-500 */
-      width: 1.875rem;
+      color: #6366f1;
+      width: 1.25rem;
       text-align: center;
       flex-shrink: 0;
+      font-size: 1rem;
       transition: color 150ms;
     }
-    .dark .nav-link i          { color: #818cf8; }  /* primary-400 */
+    .dark .nav-link i { color: #818cf8; }
 
-    .nav-link:hover {
-      background-color: #eef2ff;   /* primary-50 */
-      color: #4338ca;              /* primary-700 */
-    }
-    .dark .nav-link:hover {
-      background-color: #334155;   /* slate-700 */
-      color: #c7d2fe;              /* primary-200 */
-    }
-    .nav-link:hover i            { color: #4338ca; }
-    .dark .nav-link:hover i      { color: #c7d2fe; }
+    .nav-link:hover { background-color: #eef2ff; color: #4338ca; }
+    .dark .nav-link:hover { background-color: #334155; color: #c7d2fe; }
+    .nav-link:hover i { color: #4338ca; }
+    .dark .nav-link:hover i { color: #c7d2fe; }
 
-    .nav-link.active {
-      background-color: #e0e7ff;   /* primary-100 */
-      color: #4338ca;
-      font-weight: 600;
-    }
-    .dark .nav-link.active {
-      background-color: #475569;   /* slate-600 */
-      color: #c7d2fe;
-    }
-    .nav-link.active i           { color: #4338ca; }
-    .dark .nav-link.active i     { color: #c7d2fe; }
+    .nav-link.active { background-color: #e0e7ff; color: #4338ca; font-weight: 600; }
+    .dark .nav-link.active { background-color: #475569; color: #c7d2fe; }
+    .nav-link.active i { color: #4338ca; }
+    .dark .nav-link.active i { color: #c7d2fe; }
 
-    /* Logout special hover */
-    .nav-link-danger:hover       { background-color: #fff1f2; color: #dc2626; }
+    .nav-link-danger:hover { background-color: #fff1f2; color: #dc2626; }
     .dark .nav-link-danger:hover { background-color: rgba(153,27,27,0.2); color: #fca5a5; }
-    .nav-link-danger:hover i     { color: #dc2626; }
+    .nav-link-danger:hover i { color: #dc2626; }
     .dark .nav-link-danger:hover i { color: #fca5a5; }
 
     /* ── MD Card ─────────────────────────────────────────────── */
     .card {
       background: white;
-      border-radius: 1.5rem;
+      border-radius: 1.25rem;
       padding: 1.5rem;
       border: 1px solid #e5e7eb;
       box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
     }
-    .dark .card {
-      background: #1e293b;   /* slate-800 */
-      border-color: #334155; /* slate-700 */
-    }
+    .dark .card { background: #1e293b; border-color: #334155; }
 
-    /* ── Buttons — rectangle with rounded corners (MD3 Filled/Tonal) ── */
+    /* ── Buttons ──────────────────────────────────────────────── */
     .btn-primary {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.75rem;
-      background-color: #4f46e5;
-      color: white;
-      padding: 0.5rem 1.5rem;
-      border-radius: 12px;
-      font-size: 1.05rem;
-      font-weight: 600;
-      border: none;
-      cursor: pointer;
-      text-decoration: none;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-      transition: background-color 150ms, box-shadow 150ms;
-      user-select: none;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      background-color: #4f46e5; color: white;
+      padding: 0.5rem 1.25rem; border-radius: 10px;
+      font-size: 0.9375rem; font-weight: 600; border: none; cursor: pointer;
+      text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      transition: background-color 150ms, box-shadow 150ms; user-select: none;
     }
     .btn-primary:hover  { background-color: #4338ca; box-shadow: 0 3px 8px rgba(0,0,0,0.18); }
     .btn-primary:active { background-color: #312e81; box-shadow: none; }
 
     .btn-secondary {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.75rem;
-      background-color: #e0e7ff;   /* primary-100 */
-      color: #4338ca;              /* primary-700 */
-      padding: 0.5rem 1.5rem;
-      border-radius: 12px;
-      font-size: 1.05rem;
-      font-weight: 600;
-      border: none;
-      cursor: pointer;
-      text-decoration: none;
-      transition: background-color 150ms;
-      user-select: none;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      background-color: #e0e7ff; color: #4338ca;
+      padding: 0.5rem 1.25rem; border-radius: 10px;
+      font-size: 0.9375rem; font-weight: 600; border: none; cursor: pointer;
+      text-decoration: none; transition: background-color 150ms; user-select: none;
     }
     .btn-secondary:hover  { background-color: #c7d2fe; }
     .btn-secondary:active { background-color: #a5b4fc; }
@@ -161,84 +128,11 @@
     .dark .btn-secondary:hover  { background-color: #475569; }
     .dark .btn-secondary:active { background-color: #1e293b; }
 
-    /* ── MD Outlined Input/Select ───────────────────────────── */
-    .input {
-      width: 100%;
-      border-radius: 1rem;
-      padding: 0.625rem 1.25rem;
-      font-size: 1.05rem;
-      background-color: #ffffff;
-      color: #111827;              /* gray-900 */
-      border: 2px solid #d1d5db;  /* gray-300 */
-      outline: none;
-      transition: border-color 150ms;
-      appearance: none;
-      -webkit-appearance: none;
-    }
-    .input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
-    .input::placeholder { color: #9ca3af; }  /* gray-400 */
-
-    /* Dark mode inputs */
-    .dark .input {
-      background-color: #1e293b;   /* slate-800 */
-      color: #f1f5f9;              /* slate-100 */
-      border-color: #475569;       /* slate-600 */
-      color-scheme: dark;
-    }
-    .dark .input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,0.15); }
-    .dark .input::placeholder { color: #64748b; }  /* slate-500 */
-
-    /* Custom dropdown arrow for <select class="input"> (appearance:none removes the native one) */
-    select.input {
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 1.125rem center;
-      background-size: 1.875rem 1.875rem;
-      padding-right: 3.75rem;
-    }
-    .dark select.input {
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
-    }
-
-    /* color-scheme for native date/number pickers */
-    .dark input[type="date"], .dark input[type="number"] { color-scheme: dark; }
-
-    .label {
-      display: block;
-      font-size: 0.9rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #6b7280;    /* gray-500 */
-      margin-bottom: 0.375rem;
-    }
-    .dark .label { color: #94a3b8; } /* slate-400 */
-
-    /* ── Table ───────────────────────────────────────────────── */
-    .table-header {
-      padding: 0.5rem 1.25rem;
-      text-align: left;
-      font-size: 0.9rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #6b7280;
-    }
-    .dark .table-header { color: #94a3b8; }
-    .table-cell { padding: 0.625rem 1.25rem; font-size: 1.1rem; color: #1f2937; }
-    .dark .table-cell { color: #e2e8f0; }
-
-    /* ── HTMX loading bar ────────────────────────────────────── */
-    .htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
-    .htmx-request .htmx-indicator,
-    .htmx-request.htmx-indicator { opacity: 1; }
-
-    /* ── Button variants ──────────────────────────────────────── */
     .btn-warning {
-      display: inline-flex; align-items: center; gap: 0.75rem;
+      display: inline-flex; align-items: center; gap: 0.5rem;
       background-color: #f59e0b; color: white;
-      padding: 0.5rem 1.5rem; border-radius: 12px;
-      font-size: 1.05rem; font-weight: 600; border: none; cursor: pointer;
+      padding: 0.5rem 1.25rem; border-radius: 10px;
+      font-size: 0.9375rem; font-weight: 600; border: none; cursor: pointer;
       text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
       transition: background-color 150ms, box-shadow 150ms, opacity 150ms; user-select: none;
     }
@@ -247,10 +141,10 @@
     .btn-warning:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 
     .btn-danger {
-      display: inline-flex; align-items: center; gap: 0.75rem;
+      display: inline-flex; align-items: center; gap: 0.5rem;
       background-color: #dc2626; color: white;
-      padding: 0.5rem 1.5rem; border-radius: 12px;
-      font-size: 1.05rem; font-weight: 600; border: none; cursor: pointer;
+      padding: 0.5rem 1.25rem; border-radius: 10px;
+      font-size: 0.9375rem; font-weight: 600; border: none; cursor: pointer;
       text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
       transition: background-color 150ms, box-shadow 150ms; user-select: none;
     }
@@ -258,54 +152,190 @@
     .btn-danger:active { background-color: #991b1b; box-shadow: none; }
 
     .btn-success {
-      display: inline-flex; align-items: center; gap: 0.75rem;
+      display: inline-flex; align-items: center; gap: 0.5rem;
       background-color: #16a34a; color: white;
-      padding: 0.5rem 1.5rem; border-radius: 12px;
-      font-size: 1.05rem; font-weight: 600; border: none; cursor: pointer;
+      padding: 0.5rem 1.25rem; border-radius: 10px;
+      font-size: 0.9375rem; font-weight: 600; border: none; cursor: pointer;
       text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
       transition: background-color 150ms, box-shadow 150ms; user-select: none;
     }
     .btn-success:hover  { background-color: #15803d; box-shadow: 0 3px 8px rgba(0,0,0,0.18); }
     .btn-success:active { background-color: #166534; box-shadow: none; }
 
-    /* ── Focus rings (keyboard accessibility) ─────────────────── */
+    /* ── MD Outlined Input/Select ───────────────────────────── */
+    .input {
+      width: 100%;
+      border-radius: 0.625rem;
+      padding: 0.5rem 0.875rem;
+      font-size: 0.9375rem;
+      background-color: #ffffff;
+      color: #111827;
+      border: 2px solid #d1d5db;
+      outline: none;
+      transition: border-color 150ms;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
+    .input::placeholder { color: #9ca3af; }
+    .dark .input {
+      background-color: #1e293b; color: #f1f5f9;
+      border-color: #475569; color-scheme: dark;
+    }
+    .dark .input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,0.15); }
+    .dark .input::placeholder { color: #64748b; }
+
+    select.input {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.75rem center;
+      background-size: 1.25rem 1.25rem;
+      padding-right: 2.75rem;
+    }
+    .dark select.input {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    }
+    .dark input[type="date"],
+    .dark input[type="number"] { color-scheme: dark; }
+
+    .label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6b7280;
+      margin-bottom: 0.25rem;
+    }
+    .dark .label { color: #94a3b8; }
+
+    /* ── Table ───────────────────────────────────────────────── */
+    .table-header {
+      padding: 0.5rem 1rem;
+      text-align: left;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6b7280;
+      white-space: nowrap;
+    }
+    .dark .table-header { color: #94a3b8; }
+    .table-cell { padding: 0.625rem 1rem; font-size: 0.9375rem; color: #1f2937; }
+    .dark .table-cell { color: #e2e8f0; }
+
+    /* ── HTMX loading bar ────────────────────────────────────── */
+    .htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
+    .htmx-request .htmx-indicator,
+    .htmx-request.htmx-indicator { opacity: 1; }
+
+    /* ── Focus rings ──────────────────────────────────────────── */
     .btn-primary:focus-visible, .btn-secondary:focus-visible,
     .btn-warning:focus-visible, .btn-danger:focus-visible, .btn-success:focus-visible {
       outline: 3px solid #818cf8; outline-offset: 2px;
     }
     .nav-link:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
 
-    /* ── Reduced motion ───────────────────────────────────────── */
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        transition-duration: 0.01ms !important;
-        animation-duration: 0.01ms !important;
-      }
+    /* ── Hamburger button (in mobile top bar) ────────────────── */
+    #btn-sidebar-open {
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 0.5rem;
+      border: none;
+      background: transparent;
+      color: #4b5563;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.125rem;
+      transition: background-color 150ms, color 150ms;
+      flex-shrink: 0;
+    }
+    .dark #btn-sidebar-open { color: #d1d5db; }
+    #btn-sidebar-open:hover { background-color: #e0e7ff; color: #4338ca; }
+    .dark #btn-sidebar-open:hover { background-color: #334155; color: #c7d2fe; }
+
+    /* ── Sidebar close button (mobile only) ─────────────────── */
+    #btn-sidebar-close {
+      display: none;
+      position: absolute;
+      top: 0.75rem;
+      right: 0.75rem;
+      width: 2.25rem;
+      height: 2.25rem;
+      border-radius: 50%;
+      border: none;
+      background: transparent;
+      color: #6b7280;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.125rem;
+      transition: background-color 150ms, color 150ms;
+      z-index: 1;
+    }
+    .dark #btn-sidebar-close { color: #94a3b8; }
+    #btn-sidebar-close:hover { background-color: #f3f4f6; color: #374151; }
+    .dark #btn-sidebar-close:hover { background-color: #334155; color: #e2e8f0; }
+    @media (max-width: 1023px) {
+      #btn-sidebar-close { display: flex; }
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   {% block head %}{% endblock %}
 </head>
 
-<body class="bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-gray-100 h-full font-sans text-base">
+<body class="bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-gray-100 font-sans text-base">
 
-<!-- HTMX loading bar -->
+<!-- HTMX loading bar (above everything) -->
 <div id="htmx-loader"
-     class="htmx-indicator fixed top-0 left-0 w-full h-0.5 bg-primary-600 z-50"></div>
+     class="htmx-indicator fixed top-0 left-0 w-full bg-primary-600"
+     style="height: 3px; z-index: 60;"></div>
 
-<div class="flex h-screen overflow-hidden">
+<!-- Mobile top bar (hidden on desktop via app.css) -->
+<header class="top-bar dark:bg-slate-800 dark:border-slate-700">
+  <button id="btn-sidebar-open" aria-label="Ouvrir le menu">
+    <i class="fas fa-bars"></i>
+  </button>
+  <a href="/" class="flex items-center gap-2 flex-1 min-w-0 no-underline" style="text-decoration:none;">
+    <span class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0"
+          style="box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+      <i class="fas fa-wallet text-white" style="font-size:0.75rem;"></i>
+    </span>
+    <span class="font-bold text-sm text-primary-600 dark:text-primary-400 truncate">Finance Perso</span>
+  </a>
+  {% if current_user %}
+  <span class="w-8 h-8 rounded-full bg-primary-600 text-white text-xs font-bold
+               flex items-center justify-center flex-shrink-0 select-none">
+    {{ current_user.name | upper | truncate(length=1, end="") }}
+  </span>
+  {% endif %}
+</header>
+
+<!-- Sidebar backdrop (mobile) -->
+<div id="sidebar-overlay"></div>
+
+<!-- Layout wrapper -->
+<div class="flex">
 
   <!-- Sidebar — MD3 Navigation Drawer -->
-  <aside class="w-80 flex-shrink-0 bg-white dark:bg-slate-800
+  <aside id="sidebar"
+         class="w-72 flex-shrink-0 bg-white dark:bg-slate-800
                 border-r border-gray-200 dark:border-slate-700 flex flex-col"
          style="box-shadow: 1px 0 4px rgba(0,0,0,0.06);">
 
+    <!-- Mobile close button -->
+    <button id="btn-sidebar-close" aria-label="Fermer le menu">
+      <i class="fas fa-xmark"></i>
+    </button>
+
     <!-- Logo -->
     <div class="px-5 py-5 border-b border-gray-200 dark:border-slate-700">
-      <a href="/" class="flex items-center gap-3 no-underline">
+      <a href="/" class="flex items-center gap-3 no-underline" style="text-decoration:none;">
         <span class="w-9 h-9 rounded-xl bg-primary-600 flex items-center justify-center flex-shrink-0"
               style="box-shadow: 0 1px 3px rgba(0,0,0,0.18);">
-          <i class="fas fa-wallet text-white text-base"></i>
+          <i class="fas fa-wallet text-white text-sm"></i>
         </span>
         <span class="font-bold text-base text-primary-600 dark:text-primary-400">Finance Perso</span>
       </a>
@@ -315,8 +345,8 @@
     {% if current_user %}
     <div class="px-4 py-3 border-b border-gray-200 dark:border-slate-700">
       <div class="flex items-center gap-3 bg-primary-50 dark:bg-slate-700 rounded-xl px-3 py-2">
-        <span class="w-8 h-8 rounded-full bg-primary-600 text-white text-sm font-bold
-                     flex items-center justify-center flex-shrink-0">
+        <span class="w-8 h-8 rounded-full bg-primary-600 text-white text-xs font-bold
+                     flex items-center justify-center flex-shrink-0 select-none">
           {{ current_user.name | upper | truncate(length=1, end="") }}
         </span>
         <span class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
@@ -326,7 +356,7 @@
     </div>
     {% endif %}
 
-    <!-- Navigation links — hx-boost for no full-reload navigation -->
+    <!-- Navigation links -->
     <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto"
          hx-boost="true" hx-indicator="#htmx-loader">
       <a href="/"               class="nav-link"><i class="fas fa-home"></i> Accueil</a>
@@ -345,20 +375,41 @@
     </div>
   </aside>
 
-  <!-- Main content -->
-  <main class="flex-1 overflow-y-auto">
-    <div class="p-6">
+  <!-- Main content area -->
+  <main class="flex-1 min-w-0">
+    <div class="content-pad p-4 lg:p-6">
       {% block content %}{% endblock %}
     </div>
   </main>
 
 </div>
 
+<!-- Bottom navigation (mobile only, shown via app.css) -->
+<nav class="bottom-nav" aria-label="Navigation principale">
+  <div class="bottom-nav-items">
+    <a href="/" class="bottom-nav-item">
+      <i class="fas fa-home"></i>
+      <span>Accueil</span>
+    </a>
+    <a href="/transactions" class="bottom-nav-item">
+      <i class="fas fa-list"></i>
+      <span>Transactions</span>
+    </a>
+    <a href="/imported-files" class="bottom-nav-item">
+      <i class="fas fa-file-pdf"></i>
+      <span>Imports</span>
+    </a>
+    <a href="/settings" class="bottom-nav-item">
+      <i class="fas fa-cog"></i>
+      <span>Paramètres</span>
+    </a>
+  </div>
+</nav>
+
 <script>
-/* Active nav link — runs on first load and after every hx-boost swap */
 function setActiveNav() {
   var path = window.location.pathname;
-  document.querySelectorAll('a.nav-link').forEach(function(link) {
+  document.querySelectorAll('a.nav-link, .bottom-nav-item').forEach(function(link) {
     var href = link.getAttribute('href');
     if (!href) return;
     var active = href === '/' ? path === '/' : path.startsWith(href);
@@ -367,6 +418,40 @@ function setActiveNav() {
 }
 setActiveNav();
 document.addEventListener('htmx:afterSettle', setActiveNav);
+</script>
+
+<script>
+(function() {
+  var sidebar  = document.getElementById('sidebar');
+  var overlay  = document.getElementById('sidebar-overlay');
+  var btnOpen  = document.getElementById('btn-sidebar-open');
+  var btnClose = document.getElementById('btn-sidebar-close');
+
+  function openSidebar() {
+    sidebar.classList.add('sidebar-open');
+    overlay.classList.add('visible');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSidebar() {
+    sidebar.classList.remove('sidebar-open');
+    overlay.classList.remove('visible');
+    document.body.style.overflow = '';
+  }
+
+  if (btnOpen)  btnOpen.addEventListener('click', openSidebar);
+  if (btnClose) btnClose.addEventListener('click', closeSidebar);
+  if (overlay)  overlay.addEventListener('click', closeSidebar);
+
+  document.querySelectorAll('#sidebar a.nav-link').forEach(function(a) {
+    a.addEventListener('click', function() {
+      if (window.innerWidth < 1024) closeSidebar();
+    });
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeSidebar();
+  });
+})();
 </script>
 
 <script>

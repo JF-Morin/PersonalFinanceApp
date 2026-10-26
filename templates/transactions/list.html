@@ -156,7 +156,7 @@
 <div id="import-modal"
      style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px)"
      class="flex items-center justify-center p-4">
-  <div class="card w-full max-w-xl relative" style="max-height:88vh;overflow-y:auto"
+  <div class="modal-sheet card w-full max-w-xl relative"
        onclick="event.stopPropagation()">
 
     <div class="flex items-center justify-between mb-4">
@@ -222,8 +222,7 @@
      class="flex items-center justify-center p-4">
 
   <div id="carousel-card"
-       class="card w-full max-w-lg relative"
-       style="max-height:90vh;overflow-y:auto"
+       class="modal-sheet card w-full max-w-lg relative"
        onclick="event.stopPropagation()">
 
     <div class="flex items-center justify-between mb-4">
@@ -313,7 +312,7 @@
 <!-- ── Edit modal ─────────────────────────────────────────────────────────── -->
 <div id="edit-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px)"
      class="flex items-center justify-center p-4">
-  <div class="card max-w-3xl w-full">
+  <div class="modal-sheet card max-w-3xl w-full">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-lg font-semibold">Modifier la transaction</h2>
       <button type="button" id="edit-close"
@@ -388,7 +387,7 @@
 <!-- ── Delete modal ───────────────────────────────────────────────────────── -->
 <div id="del-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px)"
      class="flex items-center justify-center p-4">
-  <div class="card max-w-xl w-full">
+  <div class="modal-sheet card max-w-xl w-full">
     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
       <i class="fas fa-triangle-exclamation text-red-500"></i>
       Supprimer la transaction ?
@@ -432,7 +431,7 @@
 <!-- ── Manual transaction modal ──────────────────────────────────────────── -->
 <div id="manual-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px)"
      class="flex items-center justify-center p-4">
-  <div class="card max-w-3xl w-full">
+  <div class="modal-sheet card max-w-3xl w-full">
     <h2 class="text-lg font-semibold mb-4">Ajouter une transaction</h2>
     <form id="manual-form" class="grid grid-cols-2 gap-3">
       <div>
@@ -1503,7 +1502,8 @@
   function fit() {
     var top  = wrapper.getBoundingClientRect().top;
     var rem  = parseFloat(getComputedStyle(document.documentElement).fontSize);
-    wrapper.style.height = (window.innerHeight - top - rem) + 'px';
+    var bottomPad = window.innerWidth < 1024 ? 4 * rem + 8 : rem;
+    wrapper.style.height = Math.max(200, window.innerHeight - top - bottomPad) + 'px';
   }
   fit();
   window.addEventListener('resize', fit);

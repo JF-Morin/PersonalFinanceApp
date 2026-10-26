@@ -1,11 +1,16 @@
 <!DOCTYPE html>
-<html lang="fr" class="{% if is_dark %}dark{% endif %} h-full">
+<html lang="fr" class="{% if is_dark %}dark{% endif %}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Connexion — Finance Perso</title>
+  <link rel="preconnect" href="https://fonts.bunny.net">
+  <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'] } } }
+  }</script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
@@ -167,7 +172,7 @@
     sel:   null | { id, name }
     pw, pwc, cpw, cpwc, cname, clast, cbank — controlled inputs
 -->
-<body class="bg-gray-50 dark:bg-slate-900 min-h-full flex items-center justify-center p-4"
+<body class="bg-gray-50 dark:bg-slate-900 min-h-screen flex items-center justify-center p-4 font-sans"
       x-data="{ modal: null, sel: null, pw: '', pwc: '', cpw: '', cpwc: '', cname: '', clast: '', cbank: '' }">
 
 <div class="w-full max-w-sm">

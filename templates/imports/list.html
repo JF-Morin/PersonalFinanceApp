@@ -11,7 +11,7 @@
 <div id="import-modal"
      style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px)"
      class="flex items-center justify-center p-4">
-  <div class="card w-full max-w-xl relative" style="max-height:88vh;overflow-y:auto"
+  <div class="modal-sheet card w-full max-w-xl relative"
        onclick="event.stopPropagation()">
 
     <div class="flex items-center justify-between mb-4">
@@ -87,7 +87,7 @@
 <div id="delete-modal"
      style="display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.5)"
      class="flex items-center justify-center p-4">
-  <div class="card max-w-xl w-full">
+  <div class="modal-sheet card max-w-xl w-full">
     <h2 class="text-lg font-semibold mb-2">Supprimer le fichier</h2>
     <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">
       <i class="fas fa-file-pdf text-red-400 mr-1"></i>
@@ -119,7 +119,7 @@
 <div id="reparse-modal"
      style="display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.5)"
      class="flex items-center justify-center p-4">
-  <div class="card max-w-lg w-full">
+  <div class="modal-sheet card max-w-lg w-full">
     <h2 class="text-lg font-semibold mb-2">
       <i class="fas fa-rotate text-indigo-500 mr-2"></i>Réanalyser le fichier
     </h2>
@@ -656,7 +656,9 @@
   function fit() {
     var top = wrapper.getBoundingClientRect().top;
     var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-    wrapper.style.height = (window.innerHeight - top - rem) + 'px';
+    var bottomPad = window.innerWidth < 1024 ? 4 * rem + 8 : rem;
+    var h = window.innerHeight - top - bottomPad;
+    wrapper.style.height = Math.max(200, h) + 'px';
   }
   fit();
   window.addEventListener('resize', fit);
