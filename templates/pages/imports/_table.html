@@ -6,6 +6,7 @@
   counts current) and `files-changed` (this user's own delete/reparse/import), plus
   when the SSE connection (re)opens or the tab becomes visible again (phones).
   hx-sync="this:replace" keeps only the latest refresh when several arrive together.
+  Narrow screens: rows become cards and the headers sort chips (.rtable, components.css).
 #}
 <div id="files-table" class="card overflow-hidden p-0"
      hx-get="/imported-files?sort={{ sort }}&dir={{ dir }}"
@@ -13,12 +14,12 @@
      hx-swap="outerHTML"
      hx-sync="this:replace"
      hx-disinherit="*">
-  <div class="overflow-auto bg-gray-100 dark:bg-slate-900/60" data-fit-height>
-    <table class="w-full bg-white dark:bg-slate-800">
+  <div class="rtable-wrap overflow-auto bg-gray-100 dark:bg-slate-900/60" data-fit-height>
+    <table class="rtable w-full bg-white dark:bg-slate-800">
       <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600 sticky top-0 z-10">
         <tr>
           {% for c in columns %}
-          <th class="table-header" style="min-width:{{ c.min_width }}">
+          <th class="table-header th-sort{% if c.dir %} is-sorted{% endif %}" style="min-width:{{ c.min_width }}">
             <span class="flex items-center gap-1 cursor-pointer select-none"
                   hx-get="/imported-files?sort={{ c.key }}&dir={{ c.next_dir }}"
                   hx-target="#files-table"
@@ -31,21 +32,27 @@
             </span>
           </th>
           {% endfor %}
-          <th class="table-header" style="min-width:7rem"></th>
+          <th class="table-header" style="width:1%"></th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
         {% if files %}
         {% for f in files %}
-        <tr class="hover:bg-gray-50 dark:hover:bg-slate-700">
-          <td class="table-cell">
-            <i class="fas fa-file-pdf text-red-400 mr-2"></i>{{ f.filename }}
+        <tr class="rt-row hover:bg-gray-50 dark:hover:bg-slate-700">
+          <td class="table-cell rt-main">
+            <span class="rt-filename"><i class="fas fa-file-pdf text-red-400"></i><span>{{ f.filename }}</span></span>
+            <span class="m-only rt-meta">
+              <span><i class="fas fa-building-columns"></i> {{ f.bank_name }}</span>
+              <span><i class="fas fa-calendar-day"></i> {{ f.imported_at }}</span>
+              <span><i class="fas fa-list"></i> {{ f.row_count }} transaction(s)</span>
+              <span><i class="fas fa-user"></i> {{ f.importer_name }}</span>
+            </span>
           </td>
-          <td class="table-cell text-gray-500">{{ f.bank_name }}</td>
-          <td class="table-cell text-gray-500 whitespace-nowrap">{{ f.imported_at }}</td>
-          <td class="table-cell">{{ f.row_count }}</td>
-          <td class="table-cell text-gray-500">{{ f.importer_name }}</td>
-          <td class="table-cell text-right">
+          <td class="table-cell rt-hide text-gray-500 whitespace-nowrap">{{ f.bank_name }}</td>
+          <td class="table-cell rt-hide text-gray-500 whitespace-nowrap">{{ f.imported_at }}</td>
+          <td class="table-cell rt-hide">{{ f.row_count }}</td>
+          <td class="table-cell rt-hide text-gray-500">{{ f.importer_name }}</td>
+          <td class="table-cell rt-act text-right">
             <div class="flex items-center gap-1 justify-end">
               {# Reparse and delete: only for the user who imported the file. #}
               {% if f.importer_id == current_user_id %}

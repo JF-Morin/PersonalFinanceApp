@@ -8,9 +8,11 @@
   `transactions-changed` (this user's own saves). hx-sync="this:replace" keeps only
   the latest refresh when both arrive together.
   Sort headers keep the filters and push the new URL.
+  Narrow screens: the table turns into cards and the sortable headers into chips
+  (.rtable in components.css; the .m-only parts of each row show only then).
 #}
 {% set base = filter_query %}{% if base %}{% set base = base ~ "&" %}{% endif %}
-<table id="transactions-table" class="w-full bg-white dark:bg-slate-800"
+<table id="transactions-table" class="rtable w-full bg-white dark:bg-slate-800"
        hx-get="/transactions?{{ refresh_query }}"
        hx-trigger="sse:transactions, transactions-changed from:body, htmx:sseOpen from:body, visibilitychange[document.visibilityState=='visible'] from:document"
        hx-swap="outerHTML"
@@ -20,7 +22,7 @@
     <tr>
       <th class="table-header" style="width:1%;white-space:nowrap"></th>
       {% for c in columns %}
-      <th class="table-header" style="{{ c.style }}">
+      <th class="table-header{% if c.key %} th-sort{% endif %}{% if c.dir %} is-sorted{% endif %}" style="{{ c.style }}">
         {% if c.key %}
         <span class="flex items-center gap-1 cursor-pointer select-none whitespace-nowrap"
               hx-get="/transactions?{{ base }}sort={{ c.key }}&dir={{ c.next_dir }}"

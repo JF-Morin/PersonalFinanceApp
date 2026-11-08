@@ -68,11 +68,11 @@ struct SortColumn {
 
 /// (key, header label, min width, ORDER BY expression)
 const FILE_COLUMNS: [(&str, &str, &str, &str); 5] = [
-    ("filename",     "Fichier",      "16rem", "f.filename COLLATE NOCASE"),
-    ("bank",         "Banque",       "10rem", "b.name COLLATE NOCASE"),
-    ("date",         "Importé le",   "12rem", "f.imported_at"),
+    ("filename",     "Fichier",      "12rem", "f.filename COLLATE NOCASE"),
+    ("bank",         "Banque",       "6rem",  "b.name COLLATE NOCASE"),
+    ("date",         "Importé le",   "8rem",  "f.imported_at"),
     ("transactions", "Transactions", "6rem",  "row_count"),
-    ("importer",     "Importé par",  "10rem", "importer_name COLLATE NOCASE"),
+    ("importer",     "Importé par",  "6rem",  "importer_name COLLATE NOCASE"),
 ];
 
 /// Render the files table (`pages/imports/_table.html`) into `ctx`'s variables.

@@ -1,19 +1,30 @@
+{# One transaction. As a table row on wide screens; as a card on narrow ones (.rtable in
+   components.css): operation + .m-only meta line (source, date, category, owner, notes)
+   on the left, amount on the right, shares and actions underneath. #}
 <tr id="transaction-row-{{ t.id }}"
-    class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
-  <td class="table-cell text-center" title="{% if t.is_manual %}Entrée manuelle{% else %}Importé PDF{% endif %}">
+    class="rt-row{% if t.status_name != 'complete' %} is-pending{% endif %} hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
+  <td class="table-cell rt-hide text-center" title="{% if t.is_manual %}Entrée manuelle{% else %}Importé PDF{% endif %}">
     {% if t.is_manual %}
     <i class="fas fa-file-pen text-gray-400 text-sm"></i>
     {% else %}
     <i class="fas fa-file-pdf text-red-400 text-sm"></i>
     {% endif %}
   </td>
-  <td class="table-cell text-gray-500 whitespace-nowrap border-l-4 {% if t.status_name == 'complete' %}border-transparent{% else %}border-amber-400{% endif %}">{{ t.date }}</td>
-  <td class="table-cell max-w-xs truncate" title="{{ t.operation }}">{{ t.operation }}</td>
-  <td class="table-cell">
+  <td class="table-cell rt-hide text-gray-500 whitespace-nowrap border-l-4 {% if t.status_name == 'complete' %}border-transparent{% else %}border-amber-400{% endif %}">{{ t.date }}</td>
+  <td class="table-cell rt-main">
+    <span class="rt-clamp" title="{{ t.operation }}">{{ t.operation }}</span>
+    <span class="m-only rt-meta">
+      <span>{% if t.is_manual %}<i class="fas fa-file-pen"></i>{% else %}<i class="fas fa-file-pdf text-red-400"></i>{% endif %} {{ t.date }}</span>
+      <span>{% if t.category_name %}{{ t.category_name }}{% else %}<span style="color:#f59e0b">Sans catégorie</span>{% endif %}</span>
+      <span><i class="fas fa-user"></i> {{ t.owner_name }}</span>
+    </span>
+    {% if t.notes %}<span class="m-only rt-note"><i class="fas fa-note-sticky"></i> {{ t.notes }}</span>{% endif %}
+  </td>
+  <td class="table-cell rt-hide">
     {% if t.category_name %}{{ t.category_name }}{% else %}<span style="color:#f59e0b">(N/A)</span>{% endif %}
   </td>
-  <td class="table-cell whitespace-nowrap">{{ t.owner_name }}</td>
-  <td class="table-cell">
+  <td class="table-cell rt-hide whitespace-nowrap">{{ t.owner_name }}</td>
+  <td class="table-cell rt-sub">
     {% if t.shares %}
     <div class="flex flex-wrap gap-1">
       {% for s in t.shares %}
@@ -27,16 +38,16 @@
     <span style="color:#f59e0b">(N/A)</span>
     {% endif %}
   </td>
-  <td class="table-cell text-gray-500 max-w-xs truncate" title="{{ t.notes | default(value='') }}">
-    {{ t.notes | default(value="—") }}
+  <td class="table-cell rt-hide text-gray-500">
+    <span class="rt-clamp" title="{{ t.notes | default(value='') }}">{{ t.notes | default(value="—") }}</span>
   </td>
-  <td class="table-cell font-mono whitespace-nowrap" style="{% if t.amount < 0 %}color:#ef4444{% else %}color:#16a34a{% endif %}">
+  <td class="table-cell rt-side font-mono whitespace-nowrap" style="{% if t.amount < 0 %}color:#ef4444{% else %}color:#16a34a{% endif %}">
     {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | fixed2 }} {{ t.currency_symbol }}
     {% if t.foreign_currency_amount | json_encode != "null" %}
-    <span class="text-xs text-gray-400 dark:text-gray-500 ml-0.5">[{{ t.foreign_currency_amount | abs | fixed2 }} {{ t.foreign_currency_symbol }}]</span>
+    <span class="rt-foreign text-xs text-gray-400 dark:text-gray-500 ml-0.5">[{{ t.foreign_currency_amount | abs | fixed2 }} {{ t.foreign_currency_symbol }}]</span>
     {% endif %}
   </td>
-  <td class="table-cell">
+  <td class="table-cell rt-act">
     {% if t.owner_id == current_user_id %}
     <div class="flex items-center gap-1 justify-end">
       <button class="row-action w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent

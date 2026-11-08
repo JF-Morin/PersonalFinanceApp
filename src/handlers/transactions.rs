@@ -177,12 +177,12 @@ struct TableColumn {
 /// (label, style, sort key) of the data columns, between the icon and action columns.
 const TABLE_COLUMNS: [(&str, &str, &str); 7] = [
     ("Date",         "width:1%;white-space:nowrap", "date"),
-    ("Opération",    "min-width:20rem",             ""),
-    ("Catégorie",    "min-width:6rem",              "category"),
+    ("Opération",    "min-width:12rem",             ""),
+    ("Catégorie",    "",                            "category"),
     ("Propriétaire", "width:1%;white-space:nowrap", "owner"),
-    ("Participants", "min-width:6rem",              ""),
-    ("Note",         "min-width:16rem",             ""),
-    ("Montant",      "min-width:13rem",             "amount"),
+    ("Participants", "",                            ""),
+    ("Note",         "min-width:10rem",             ""),
+    ("Montant",      "width:1%;white-space:nowrap", "amount"),
 ];
 
 /// Context for `pages/transactions/_table.html` (also used inside the full page).

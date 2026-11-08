@@ -221,6 +221,7 @@
 
   /* Card padding: tighter on small screens */
   .card { padding: 1rem !important; }
+  .card.p-0 { padding: 0 !important; } /* table cards: the table goes edge to edge */
 
   /* Table header/cell: tighter horizontal padding */
   .table-header { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
