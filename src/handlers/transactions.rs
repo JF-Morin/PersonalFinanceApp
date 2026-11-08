@@ -379,13 +379,6 @@ pub async fn get_edit_modal(
     let t = owned_transaction(&state.db, user_id, id).await?;
     let mut ctx = tera::Context::new();
     insert_form_options(&mut ctx, &state.db, user_id).await?;
-    // Foreign-currency transactions are edited in their original currency.
-    let (amount, currency_id) = match (t.foreign_currency_amount, t.foreign_currency_id) {
-        (Some(fa), Some(fc)) => (fa, fc),
-        _ => (t.amount, t.currency_id),
-    };
-    ctx.insert("edit_amount", &amount);
-    ctx.insert("edit_currency_id", &currency_id);
     ctx.insert("shares_init", &shares_init(&t));
     ctx.insert("t", &t);
     Ok(Html(state.tera.render("modal/transaction_edit.html", &ctx)?))
@@ -406,16 +399,15 @@ pub async fn get_delete_modal(
 
 // ── Updating ──────────────────────────────────────────────────────────────────
 
-/// Fields submitted by the edit modal and the carousel. Absent fields keep their
-/// current value (the carousel has no date/currency, and operation/amount only for
-/// broken lines); `shares_json` absent means "don't touch the shares".
+/// Fields submitted by the edit modal and the carousel. Only the category, the notes
+/// and the shares can be changed; operation/amount are accepted only for a broken line
+/// (the parser couldn't read them) and ignored otherwise. Date, currency and owner never
+/// change. `shares_json` absent means "don't touch the shares".
 #[derive(Deserialize)]
 pub struct UpdateTransactionForm {
-    pub date: Option<String>,
     pub operation: Option<String>,
     /// A string so an emptied field is "keep" rather than a 422 from the extractor.
     pub amount: Option<String>,
-    pub currency_id: Option<i64>,
     pub category_id: Option<String>,
     pub notes: Option<String>,
     pub shares_json: Option<String>,
@@ -483,87 +475,43 @@ async fn update_transaction(
         .as_deref()
         .filter(|s| !s.is_empty())
         .and_then(|s| s.parse().ok());
+    let notes = form.notes.as_deref().map(str::trim).filter(|s| !s.is_empty());
 
-    let default_currency_id = default_currency_id(&state.db).await;
+    // One DB transaction: the row, its shares and its status are saved together or not at all.
+    let mut tx = state.db.begin().await?;
 
-    // Fetch the current row to fill in any fields the form didn't touch.
-    let cur: Option<(String, i64, Option<f64>, Option<i64>)> = sqlx::query_as(
-        "SELECT date, currency_id, foreign_currency_amount, foreign_currency_id \
-         FROM transactions WHERE id = ? AND owner_id = ?",
+    let broken: Option<bool> = sqlx::query_scalar(
+        "SELECT parse_note IS NOT NULL FROM transactions WHERE id = ? AND owner_id = ?",
     )
     .bind(id)
     .bind(user_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await?;
-    let Some((cur_date, cur_currency_id, cur_fca, _)) = cur else {
+    let Some(broken) = broken else {
         return Ok(Err("Transaction introuvable ou non autorisée".into()));
     };
-    let effective_date        = form.date.clone().unwrap_or(cur_date);
-    let effective_currency_id = form.currency_id.unwrap_or(cur_currency_id);
-    // A "foreign" transaction is one whose currency differs from the app default.
-    let is_foreign            = effective_currency_id != default_currency_id;
+    // Operation and amount are only correctable on a broken line.
+    let (operation, amount) = if broken {
+        (form.operation.as_deref().map(str::trim).filter(|s| !s.is_empty()), amount)
+    } else {
+        (None, None)
+    };
 
-    // If the currency is foreign, fetch the exchange rate and convert to the default currency.
-    // The original foreign amount is stored separately for display purposes.
-    let (final_amount, final_currency_id, final_fca, final_fci): (Option<f64>, i64, Option<f64>, Option<i64>) =
-        if is_foreign {
-            let foreign_amount = amount.or(cur_fca).unwrap_or(0.0);
-            let from_code: String = sqlx::query_scalar("SELECT code FROM currencies WHERE id = ?")
-                .bind(effective_currency_id)
-                .fetch_one(&state.db)
-                .await
-                .unwrap_or_default();
-            let to_code: String = sqlx::query_scalar("SELECT code FROM currencies WHERE id = ?")
-                .bind(default_currency_id)
-                .fetch_one(&state.db)
-                .await
-                .unwrap_or_default();
-            let rate = crate::currency::get_exchange_rate(&from_code, &to_code, &effective_date)
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::warn!(from=%from_code, to=%to_code, date=%effective_date, err=%e, "Exchange rate fetch failed; using 1.0");
-                    1.0
-                });
-            let converted = foreign_amount * rate;
-            tracing::info!(
-                id=%id, foreign_amount=%foreign_amount, from=%from_code,
-                to=%to_code, rate=%rate, converted=%converted,
-                "Currency recalculated on transaction update"
-            );
-            (Some(converted), default_currency_id, Some(foreign_amount), Some(effective_currency_id))
-        } else {
-            (amount, default_currency_id, None, None)
-        };
-
-    // One DB transaction: the row, its shares and its status are saved together or not at all.
-    // (The exchange rate above is fetched first — no network call while the DB is locked.)
-    let mut tx = state.db.begin().await?;
-
-    // `COALESCE(?, column)` means: use the form value if provided, otherwise keep the existing value.
-    // `parse_note = NULL` clears any broken-parser note now that the user has corrected the row.
+    // `COALESCE(?, column)` keeps the existing value when the field isn't corrected.
+    // `parse_note = NULL` clears any broken-parser note now that the user has checked the row.
     sqlx::query(
         "UPDATE transactions \
-         SET date                    = ?, \
-             transaction_date        = ?, \
-             operation               = COALESCE(?, operation), \
-             amount                  = COALESCE(?, amount), \
-             currency_id             = ?, \
-             category_id             = ?, \
-             notes                   = ?, \
-             foreign_currency_amount = ?, \
-             foreign_currency_id     = ?, \
-             parse_note              = NULL \
+         SET operation   = COALESCE(?, operation), \
+             amount      = COALESCE(?, amount), \
+             category_id = ?, \
+             notes       = ?, \
+             parse_note  = NULL \
          WHERE id = ? AND owner_id = ?",
     )
-    .bind(&effective_date)
-    .bind(&effective_date)
-    .bind(form.operation.as_deref())
-    .bind(final_amount)
-    .bind(final_currency_id)
+    .bind(operation)
+    .bind(amount)
     .bind(category_id)
-    .bind(&form.notes)
-    .bind(final_fca)
-    .bind(final_fci)
+    .bind(notes)
     .bind(id)
     .bind(user_id)
     .execute(&mut *tx)
@@ -576,11 +524,11 @@ async fn update_transaction(
     tx.commit().await?;
 
     state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
-    tracing::info!(id=%id, user_id=%user_id, is_complete=%is_complete, is_foreign=%is_foreign, "Transaction updated");
+    tracing::info!(id=%id, user_id=%user_id, is_complete=%is_complete, "Transaction updated");
     Ok(Ok(is_complete))
 }
 
-/// POST /transactions/:id/update — save the edit modal (fields and shares). The header
+/// POST /transactions/:id/update — save the edit modal (category, notes, shares). The header
 /// shows a toast, closes the modal and fires `transactions-changed`: the whole table
 /// re-fetches itself (rows are never swapped one by one).
 pub async fn post_update_transaction(

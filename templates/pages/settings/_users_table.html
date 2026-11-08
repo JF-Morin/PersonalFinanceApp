@@ -71,9 +71,9 @@
               </button>
               {% if current_user.is_admin %}
               <button
-                hx-delete="/settings/users/{{ u.id }}"
-                hx-confirm="Supprimer {{ u.name }} ? Cette action est irréversible."
-                hx-swap="none"
+                hx-get="/settings/users/{{ u.id }}/delete"
+                hx-target="#modal-root"
+                hx-swap="innerHTML"
                 class="w-8 h-8 flex items-center justify-center rounded-full
                        text-red-400 dark:text-red-400
                        hover:text-red-600 dark:hover:text-red-500

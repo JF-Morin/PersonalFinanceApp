@@ -1,65 +1,52 @@
 {#
   Rendered alone by GET /login/users/:id (mode "verify" or "set") into #modal-root —
-  only the card; the overlay and close() come from layout/shell.html. The forms are plain POSTs that redirect (to / on success, or back
-  to /login with an error shown as a toast).
+  only the card; the overlay and close() come from layout/shell.html. The forms are
+  plain POSTs that redirect (to / on success, or back to /login with an error shown
+  as a toast). Same modal pattern as the rest of the app (modal/_header.html,
+  .label / .input fields, .modal-footer).
 #}
-<div class="modal-sheet relative w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6"
+{% set modal_subtitle = user.name %}{% if user.last_name %}{% set modal_subtitle = user.name ~ " " ~ user.last_name %}{% endif %}
+{% if mode == "set" %}{% set modal_title = "Définir votre mot de passe" %}{% set modal_icon = "fa-key" %}{% set modal_tone = "warning" %}
+{% else %}{% set modal_title = "Connexion" %}{% set modal_icon = "fa-lock" %}{% endif %}
+<div class="modal-sheet card w-full" style="--modal-width: 24rem"
      x-data="{ pw: '', pwc: '' }">
+  {% include "modal/_header.html" %}
 
-  <!-- User identity chip -->
-  <div class="flex items-center gap-3 mb-5">
-    <span class="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg flex-shrink-0
-                 {% if mode == 'set' %}bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400
-                 {% else %}bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400{% endif %}">
-      {{ user.name | upper | truncate(length=1, end="") }}
-    </span>
-    <div>
-      <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">
-        {{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}
-      </div>
-      <div class="text-xs mt-0.5 {% if mode == 'set' %}text-amber-500 dark:text-amber-400{% else %}text-gray-400 dark:text-gray-500{% endif %}">
-        {% if mode == "set" %}Définissez votre mot de passe{% else %}Entrez votre mot de passe{% endif %}
-      </div>
-    </div>
-  </div>
-
-  <form action="/login" method="POST">
+  <form action="/login" method="POST" class="space-y-3">
     <input type="hidden" name="user_id" value="{{ user.id }}">
     {% if mode == "set" %}
-    <div class="space-y-3 mb-4">
-      <div>
-        <label class="lbl">Nouveau mot de passe</label>
-        <input type="password" name="new_password" x-model="pw" autofocus
-               class="field" placeholder="Choisissez un mot de passe" required
-               autocomplete="new-password">
-      </div>
-      <div>
-        <label class="lbl">Confirmer</label>
-        <input type="password" name="new_password_confirm" x-model="pwc"
-               class="field" placeholder="Répétez le mot de passe"
-               autocomplete="new-password">
-        <p x-show="pwc.length > 0 && pw !== pwc" x-cloak
-           class="text-red-500 dark:text-red-400 text-xs mt-1.5">
-          <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
-        </p>
-      </div>
+    <div>
+      <label class="label">Nouveau mot de passe</label>
+      <input type="password" name="new_password" x-model="pw" autofocus
+             class="input" placeholder="Choisissez un mot de passe" required
+             autocomplete="new-password">
     </div>
-    <div class="flex gap-3">
-      <button type="button" @click="close()" class="btn-ghost">Annuler</button>
-      <button type="submit" class="btn-amber" :disabled="!pw || pw !== pwc">
-        <i class="fas fa-key"></i> Définir &amp; se connecter
+    <div>
+      <label class="label">Confirmer</label>
+      <input type="password" name="new_password_confirm" x-model="pwc"
+             class="input" placeholder="Répétez le mot de passe"
+             autocomplete="new-password">
+      <p x-show="pwc.length > 0 && pw !== pwc" x-cloak
+         class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+        <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+      <button type="submit" class="btn-primary" :disabled="!pw || pw !== pwc">
+        <i class="fas fa-key"></i> Définir et se connecter
       </button>
     </div>
     {% else %}
-    <div class="mb-4">
-      <label class="lbl">Mot de passe</label>
+    <div>
+      <label class="label">Mot de passe</label>
       <input type="password" name="password" autofocus
-             class="field" placeholder="••••••••" required
+             class="input" placeholder="••••••••" required
              autocomplete="current-password">
     </div>
-    <div class="flex gap-3">
-      <button type="button" @click="close()" class="btn-ghost">Annuler</button>
-      <button type="submit" class="btn-indigo">
+    <div class="modal-footer">
+      <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+      <button type="submit" class="btn-primary">
         <i class="fas fa-arrow-right-to-bracket"></i> Connexion
       </button>
     </div>

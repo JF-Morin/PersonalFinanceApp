@@ -1,20 +1,13 @@
 {% extends "layout/shell.html" %}
-{# The app layout: mobile top bar, sidebar, main content, mobile bottom nav. #}
+{# The app layout: sidebar (desktop), mobile top bar + floating bottom nav (phone), main content. #}
 
-{# `sidebarOpen` drives the mobile navigation drawer (_sidebar.html). #}
 {% block body_attrs %}class="bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-gray-100 font-sans text-base"
-      x-data="{ sidebarOpen: false }"
-      :class="{ 'overflow-hidden': sidebarOpen }"
-      @keydown.escape.window="sidebarOpen = false"
       {% if current_user %}hx-ext="sse" sse-connect="/events"{% endif %}{% endblock %}
 
 {% block body %}
 
-<!-- Mobile top bar (hidden on desktop via app.css) -->
-<header class="top-bar dark:bg-slate-800 dark:border-slate-700">
-  <button id="btn-sidebar-open" aria-label="Ouvrir le menu" @click="sidebarOpen = true">
-    <i class="fas fa-bars"></i>
-  </button>
+<!-- Mobile top bar (hidden on desktop via app.css): logo + user menu -->
+<header class="top-bar">
   <a href="/" class="flex items-center gap-2 flex-1 min-w-0 no-underline" style="text-decoration:none;">
     <span class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0"
           style="box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
@@ -23,20 +16,36 @@
     <span class="font-bold text-sm text-primary-600 dark:text-primary-400 truncate">Finance Perso</span>
   </a>
   {% if current_user %}
-  <span class="w-8 h-8 rounded-full bg-primary-600 text-white text-xs font-bold
-               flex items-center justify-center flex-shrink-0 select-none">
-    {{ current_user.name | upper | truncate(length=1, end="") }}
-  </span>
+  <!-- User menu: the avatar opens a small panel with the logout button -->
+  <div class="user-menu" x-data="{ open: false }"
+       @click.outside="open = false" @keydown.escape.window="open = false">
+    <button type="button" class="user-avatar" @click="open = !open"
+            :aria-expanded="open" aria-haspopup="menu" aria-label="Menu utilisateur">
+      {{ current_user.name | upper | truncate(length=1, end="") }}
+    </button>
+    <div class="user-menu-panel" x-show="open" x-cloak
+         x-transition.origin.top.right role="menu">
+      <div class="user-menu-head">
+        <span class="user-avatar" aria-hidden="true">{{ current_user.name | upper | truncate(length=1, end="") }}</span>
+        <div class="min-w-0">
+          <p class="user-menu-name truncate">{{ current_user.name }}{% if current_user.last_name %} {{ current_user.last_name }}{% endif %}</p>
+          <p class="user-menu-hint">Connecté</p>
+        </div>
+      </div>
+      <form action="/logout" method="POST">
+        <button type="submit" class="user-menu-item danger" role="menuitem">
+          <i class="fas fa-right-from-bracket"></i> Changer d'utilisateur
+        </button>
+      </form>
+    </div>
+  </div>
   {% endif %}
 </header>
-
-<!-- Sidebar backdrop (mobile) -->
-<div id="sidebar-overlay" :class="{ visible: sidebarOpen }" @click="sidebarOpen = false"></div>
 
 <!-- Layout wrapper -->
 <div class="flex">
 
-  <!-- Sidebar — MD3 Navigation Drawer -->
+  <!-- Sidebar (desktop only — phones use the bottom nav) -->
   {% include "layout/_sidebar.html" %}
 
   <!-- Main content area -->
@@ -48,25 +57,26 @@
 
 </div>
 
-<!-- Bottom navigation (mobile only, shown via app.css) -->
-<nav class="bottom-nav" aria-label="Navigation principale">
-  <div class="bottom-nav-items">
-    <a href="/" class="bottom-nav-item{% if active_nav == "/" %} active{% endif %}">
-      <i class="fas fa-home"></i>
-      <span>Accueil</span>
-    </a>
-    <a href="/transactions" class="bottom-nav-item{% if active_nav == "/transactions" %} active{% endif %}">
-      <i class="fas fa-list"></i>
-      <span>Transactions</span>
-    </a>
-    <a href="/imported-files" class="bottom-nav-item{% if active_nav == "/imported-files" %} active{% endif %}">
-      <i class="fas fa-file-pdf"></i>
-      <span>Imports</span>
-    </a>
-    <a href="/settings" class="bottom-nav-item{% if active_nav == "/settings" %} active{% endif %}">
-      <i class="fas fa-cog"></i>
-      <span>Paramètres</span>
-    </a>
-  </div>
+<!-- Bottom navigation (phones only, shown via app.css): a floating rounded bar. The
+     active page sits on .bottom-nav-indicator; navigating swaps the page inside a view
+     transition (transition:true), which slides the indicator to the new item (app.css). -->
+<nav class="bottom-nav" aria-label="Navigation principale"
+     hx-boost="true" hx-swap="innerHTML transition:true">
+  <a href="/" class="bottom-nav-item{% if active_nav == "/" %} active{% endif %}"{% if active_nav == "/" %} aria-current="page"{% endif %}>
+    {% if active_nav == "/" %}<span class="bottom-nav-indicator" aria-hidden="true"></span>{% endif %}
+    <span class="bottom-nav-content"><i class="fas fa-home"></i><span>Accueil</span></span>
+  </a>
+  <a href="/transactions" class="bottom-nav-item{% if active_nav == "/transactions" %} active{% endif %}"{% if active_nav == "/transactions" %} aria-current="page"{% endif %}>
+    {% if active_nav == "/transactions" %}<span class="bottom-nav-indicator" aria-hidden="true"></span>{% endif %}
+    <span class="bottom-nav-content"><i class="fas fa-list"></i><span>Transactions</span></span>
+  </a>
+  <a href="/imported-files" class="bottom-nav-item{% if active_nav == "/imported-files" %} active{% endif %}"{% if active_nav == "/imported-files" %} aria-current="page"{% endif %}>
+    {% if active_nav == "/imported-files" %}<span class="bottom-nav-indicator" aria-hidden="true"></span>{% endif %}
+    <span class="bottom-nav-content"><i class="fas fa-file-pdf"></i><span>Imports</span></span>
+  </a>
+  <a href="/settings" class="bottom-nav-item{% if active_nav == "/settings" %} active{% endif %}"{% if active_nav == "/settings" %} aria-current="page"{% endif %}>
+    {% if active_nav == "/settings" %}<span class="bottom-nav-indicator" aria-hidden="true"></span>{% endif %}
+    <span class="bottom-nav-content"><i class="fas fa-cog"></i><span>Paramètres</span></span>
+  </a>
 </nav>
 {% endblock %}

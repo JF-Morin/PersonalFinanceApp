@@ -3,28 +3,21 @@
   the overlay and close() come from layout/shell.html). The confirm buttons get a
   toast and a `files-changed` event back (HX-Trigger), which refreshes the files table.
 #}
-<div class="modal-sheet card max-w-xl w-full">
-  <h2 class="text-lg font-semibold mb-2">Supprimer le fichier</h2>
-  <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">
-    <i class="fas fa-file-pdf text-red-400 mr-1"></i>
-    <span class="font-medium text-gray-900 dark:text-white">{{ file.filename }}</span>
-  </p>
-  <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 mt-3">
+<div class="modal-sheet card w-full" style="--modal-width: 36rem">
+  {% set modal_title = "Supprimer le fichier ?" %}{% set modal_icon = "fa-trash-can" %}{% set modal_tone = "danger" %}{% set modal_subtitle = file.filename %}
+  {% include "modal/_header.html" %}
+  <p class="text-sm text-gray-600 dark:text-gray-300">
     Le fichier et ses <strong>{{ file.row_count }}</strong> transaction(s) seront supprimés.
     Une transaction supprimée seule peut être récupérée avec « Réanalyser » ; pas un fichier supprimé.
   </p>
-  <div class="flex flex-col gap-2">
+  <div class="modal-footer">
+    <button type="button" @click="close()" class="btn-secondary">Annuler</button>
     <button hx-post="/imported-files/{{ file.id }}/delete"
             hx-swap="none"
             hx-disabled-elt="this"
             @htmx:after-request="close()"
-            class="btn-primary w-full justify-center"
-            style="background:#dc2626; border-color:#dc2626">
-      <i class="fas fa-trash mr-2"></i> Supprimer le fichier et ses transactions
-    </button>
-    <button type="button" @click="close()"
-            class="btn-secondary w-full justify-center mt-1">
-      Annuler
+            class="btn-danger">
+      <i class="fas fa-trash-can"></i> Supprimer
     </button>
   </div>
 </div>

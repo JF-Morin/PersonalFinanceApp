@@ -3,43 +3,14 @@
   Confirming answers with HX-Trigger {"toast", "close-modal", "transactions-changed"}:
   the whole table re-fetches itself. On error the toast says why.
 #}
-<div class="modal-sheet card max-w-xl w-full">
-  <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-    <i class="fas fa-triangle-exclamation text-red-500"></i>
-    Supprimer la transaction ?
-  </h2>
-  <div class="rounded-xl bg-gray-50 dark:bg-slate-700/50 border border-gray-200 dark:border-slate-600 p-4 mb-4 space-y-2.5">
-    <div class="flex items-start gap-2">
-      <i class="fas fa-file-lines text-gray-400 mt-0.5 w-4 flex-shrink-0 text-xs"></i>
-      <span class="text-sm font-medium text-gray-900 dark:text-gray-100 leading-snug">{{ t.operation }}</span>
-    </div>
-    <div class="flex flex-wrap gap-x-6 gap-y-1.5 text-sm text-gray-500 dark:text-gray-400">
-      <span class="flex items-center gap-1.5">
-        <i class="fas fa-calendar-day w-3.5 text-xs"></i>
-        <span>{{ t.date }}</span>
-      </span>
-      <span class="flex items-center gap-1.5">
-        <i class="fas fa-coins w-3.5 text-xs"></i>
-        <span class="font-semibold" style="color:{% if t.amount < 0 %}#ef4444{% else %}#16a34a{% endif %}">
-          {% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | fixed2 }} {{ t.currency_symbol }}
-        </span>
-      </span>
-      {% if t.category_name %}
-      <span class="flex items-center gap-1.5">
-        <i class="fas fa-tag w-3.5 text-xs"></i>
-        <span>{{ t.category_name }}</span>
-      </span>
-      {% endif %}
-      <span class="flex items-center gap-1.5">
-        <i class="fas fa-user w-3.5 text-xs"></i>
-        <span>{{ t.owner_name }}</span>
-      </span>
-    </div>
-  </div>
-  <p class="text-xs text-red-500 dark:text-red-400 mb-5 flex items-center gap-1.5">
+<div class="modal-sheet card w-full" style="--modal-width: 36rem">
+  {% set modal_title = "Supprimer la transaction ?" %}{% set modal_icon = "fa-trash-can" %}{% set modal_tone = "danger" %}
+  {% include "modal/_header.html" %}
+  {% set summary_category = true %}{% include "modal/_transaction_summary.html" %}
+  <p class="text-xs text-red-500 dark:text-red-400 flex items-center gap-1.5">
     <i class="fas fa-triangle-exclamation"></i> Cette action est irréversible.
   </p>
-  <div class="flex gap-2 justify-end">
+  <div class="modal-footer">
     <button type="button" @click="close()" class="btn-secondary">Annuler</button>
     <button class="btn-danger"
             hx-post="/transactions/{{ t.id }}/delete"

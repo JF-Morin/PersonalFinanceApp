@@ -68,7 +68,7 @@
 }
 
 /* ── Share inline list ────────────────────────────────────── */
-.share-inline-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.share-inline-list { display: flex; flex-direction: column; gap: 0.5rem; max-width: 20rem; }
 .share-inline-row  { display: flex; align-items: center; gap: 0.75rem; }
 .share-inline-label { flex: 1; min-width: 0; }
 .share-inline-input { width: 7rem; text-align: right; flex-shrink: 0; }

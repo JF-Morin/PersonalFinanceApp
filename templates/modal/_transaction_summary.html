@@ -1,0 +1,27 @@
+{#
+  Read-only recap of a transaction at the top of a modal (edit, carousel, delete).
+  Expects `t`; set `summary_category = true` before including to also show the category.
+  Colours (accent bar, amount pill) follow the sign of the amount — see .modal-summary.
+#}
+<div class="modal-summary {% if t.amount < 0 %}is-debit{% else %}is-credit{% endif %}">
+  <div class="summary-head">
+    <p class="summary-title">{{ t.operation }}</p>
+    <div class="text-right flex-shrink-0">
+      <span class="summary-amount">{% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | fixed2 }} {{ t.currency_symbol }}</span>
+      {% if t.foreign_currency_amount %}
+      <p class="summary-foreign">{{ t.foreign_currency_amount | abs | fixed2 }} {{ t.foreign_currency_symbol }}</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="summary-meta">
+    <span class="summary-chip"><i class="fas fa-calendar-day"></i>{{ t.date }}</span>
+    <span class="summary-chip"><i class="fas fa-user"></i>{{ t.owner_name }}</span>
+    <span class="summary-chip">{% if t.is_manual %}<i class="fas fa-keyboard"></i>Manuelle{% else %}<i class="fas fa-file-pdf"></i>Relevé PDF{% endif %}</span>
+    {% if summary_category is defined and summary_category and t.category_name %}
+    <span class="summary-chip"><i class="fas fa-tag"></i>{{ t.category_name }}</span>
+    {% endif %}
+  </div>
+  {% if t.parse_note %}
+  <p class="summary-note"><i class="fas fa-triangle-exclamation"></i><span>{{ t.parse_note }}</span></p>
+  {% endif %}
+</div>

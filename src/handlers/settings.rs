@@ -337,6 +337,28 @@ struct EditUserView {
     has_password: bool,
 }
 
+/// GET /settings/users/:id/delete — the delete confirmation modal (admin only, like the
+/// deletion itself).
+pub async fn get_delete_user_modal(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Path(id): Path<i64>,
+) -> AppResult<Html<String>> {
+    let viewer = super::get_current_user(&jar, &state.db).await?;
+    if !viewer.is_admin {
+        return Err(AppError::Other("Seul l'administrateur peut supprimer des utilisateurs.".into()));
+    }
+    let u = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Other("Utilisateur introuvable".into()))?;
+    let mut ctx = tera::Context::new();
+    ctx.insert("user", &serde_json::json!({ "id": u.id, "name": u.name, "last_name": u.last_name }));
+    ctx.insert("is_self", &(u.id == viewer.id));
+    Ok(Html(state.tera.render("modal/user_delete.html", &ctx)?))
+}
+
 /// GET /settings/users/:id/edit — the edit-user modal (loaded into `#modal-root`).
 pub async fn get_edit_user_modal(
     State(state): State<AppState>,

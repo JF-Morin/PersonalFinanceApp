@@ -1,0 +1,29 @@
+{#
+  Rendered alone by GET /settings/users/:id/delete into #modal-root (admin only).
+  Confirming sends DELETE /settings/users/:id: toast + `users-changed` (the users table
+  re-fetches itself); deleting your own account logs you out (HX-Redirect to /login).
+#}
+{% set modal_title = "Supprimer l'utilisateur ?" %}{% set modal_icon = "fa-user-xmark" %}{% set modal_tone = "danger" %}
+{% set modal_subtitle = user.name %}{% if user.last_name %}{% set modal_subtitle = user.name ~ " " ~ user.last_name %}{% endif %}
+<div class="modal-sheet card w-full" style="--modal-width: 28rem">
+  {% include "modal/_header.html" %}
+  <p class="text-sm text-gray-600 dark:text-gray-300">
+    {% if is_self %}
+    Vous allez supprimer <strong>votre propre compte</strong> et être déconnecté.
+    Le prochain utilisateur créé deviendra administrateur.
+    {% else %}
+    Le profil sera supprimé définitivement.
+    {% endif %}
+    Un utilisateur qui a encore des transactions, des parts ou des fichiers importés ne peut pas être supprimé.
+  </p>
+  <div class="modal-footer">
+    <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+    <button hx-delete="/settings/users/{{ user.id }}"
+            hx-swap="none"
+            hx-disabled-elt="this"
+            @htmx:after-request="close()"
+            class="btn-danger">
+      <i class="fas fa-trash-can"></i> Supprimer
+    </button>
+  </div>
+</div>

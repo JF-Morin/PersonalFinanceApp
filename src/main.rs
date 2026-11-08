@@ -143,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/settings/users",          get(handlers::settings::get_users_table)
                                           .post(handlers::settings::post_new_user))
         .route("/settings/users/:id",      delete(handlers::settings::delete_user))
+        .route("/settings/users/:id/delete", get(handlers::settings::get_delete_user_modal))
         .route("/settings/users/:id/edit", get(handlers::settings::get_edit_user_modal)
                                           .post(handlers::settings::post_edit_user))
         // ── Transactions ──────────────────────────────────────────────────────

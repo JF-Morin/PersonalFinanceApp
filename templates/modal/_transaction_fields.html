@@ -1,0 +1,39 @@
+{#
+  The editable part of a transaction, shared by the edit modal and the carousel card:
+  a read-only summary (modal/_transaction_summary.html), then the only fields a user can change —
+  category, shares and notes. Operation and amount are editable only for a broken line
+  (the parser couldn't read them); the server ignores them otherwise.
+  Expects `t`, `categories` and what modal/_shares_field.html needs.
+#}
+{% include "modal/_transaction_summary.html" %}
+
+<div class="space-y-3">
+  {% if t.parse_note %}
+  <div>
+    <label class="label">Opération *</label>
+    <input name="operation" type="text" value="{{ t.operation }}" class="input" placeholder="Description de l'opération">
+  </div>
+  <div>
+    <label class="label">Montant *</label>
+    <input name="amount" type="number" step="0.01" value="{{ t.amount }}" class="input">
+  </div>
+  {% endif %}
+  <div>
+    <label class="label">Catégorie *</label>
+    <select name="category_id" class="input">
+      <option value="">— Choisir —</option>
+      {% for c in categories %}
+      <option value="{{ c.id }}" {% if t.category_id and c.id == t.category_id %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    {% include "modal/_shares_field.html" %}
+  </div>
+
+  <div>
+    <label class="label">Notes <span class="text-gray-400 font-normal">(optionnel)</span></label>
+    <input name="notes" type="text" value="{{ t.notes | default(value='') }}" class="input" placeholder="Note libre…">
+  </div>
+</div>

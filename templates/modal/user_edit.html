@@ -27,28 +27,10 @@
      },
      get canSave() { return this.pwValid && (this.profileChanged || this.pwFull); }
    }"
-   class="modal-sheet relative w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6">
+   class="modal-sheet card w-full" style="--modal-width: 28rem">
 
-  <div class="flex items-center justify-between mb-5">
-    <div class="flex items-center gap-3">
-      <span class="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/50
-                   text-primary-600 dark:text-primary-400 font-bold text-sm
-                   flex items-center justify-center flex-shrink-0"
-            x-text="name ? name.charAt(0).toUpperCase() : '?'">
-      </span>
-      <div>
-        <div class="font-bold text-gray-900 dark:text-gray-100 text-sm"
-             x-text="name || 'Utilisateur'"></div>
-        <div class="text-xs text-gray-400 dark:text-gray-500">Modifier le profil</div>
-      </div>
-    </div>
-    <button type="button" @click="close()"
-            class="w-8 h-8 flex items-center justify-center rounded-full
-                   text-gray-400 hover:text-gray-600 dark:hover:text-gray-200
-                   hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors border-none cursor-pointer">
-      <i class="fas fa-xmark"></i>
-    </button>
-  </div>
+  {% set modal_title = "Modifier le profil" %}{% set modal_icon = "fa-user-pen" %}{% set modal_subtitle = user.name %}{% if user.last_name %}{% set modal_subtitle = user.name ~ " " ~ user.last_name %}{% endif %}
+  {% include "modal/_header.html" %}
 
   <form hx-post="/settings/users/{{ user.id }}/edit"
         hx-swap="none"
@@ -109,22 +91,12 @@
 
     <!-- Filled by the server on a validation error (HX-Retarget); hidden while empty -->
     <div id="edit-user-error"
-         class="empty:hidden text-sm text-red-600 dark:text-red-400 rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2"></div>
+         class="modal-error"></div>
 
-    <div class="flex gap-3 pt-1">
-      <button type="button" @click="close()"
-              class="flex-1 py-2.5 rounded-lg text-sm font-semibold
-                     bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600
-                     text-gray-700 dark:text-gray-200 border-none cursor-pointer transition-colors">
-        Annuler
-      </button>
-      <button type="submit"
-              :disabled="!canSave"
-              class="flex-1 py-2.5 rounded-lg text-sm font-semibold
-                     bg-indigo-600 hover:bg-indigo-700 text-white
-                     disabled:opacity-40 disabled:cursor-not-allowed
-                     border-none cursor-pointer transition-colors shadow-md">
-        <i class="fas fa-check mr-1"></i> Enregistrer
+    <div class="modal-footer">
+      <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+      <button type="submit" :disabled="!canSave" class="btn-primary">
+        <i class="fas fa-check"></i> Enregistrer
       </button>
     </div>
 

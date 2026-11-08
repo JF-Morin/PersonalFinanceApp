@@ -1,0 +1,15 @@
+{#
+  Shared modal header: icon, title, optional subtitle, ✕ close (calls the shell's close()).
+  Set before including: modal_title, modal_icon (Font Awesome name, e.g. "fa-trash-can"),
+  optional modal_tone ("danger" / "warning") and modal_subtitle.
+#}
+<div class="modal-header">
+  <span class="modal-icon {{ modal_tone | default(value='') }}"><i class="fas {{ modal_icon }}"></i></span>
+  <div class="min-w-0">
+    <h2 class="modal-title">{{ modal_title }}</h2>
+    {% if modal_subtitle is defined and modal_subtitle %}<p class="modal-subtitle truncate">{{ modal_subtitle }}</p>{% endif %}
+  </div>
+  <button type="button" class="modal-close" @click="close()" aria-label="Fermer">
+    <i class="fas fa-xmark"></i>
+  </button>
+</div>

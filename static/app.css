@@ -27,7 +27,8 @@
 
   --sidebar-w:    17rem;   /* 272px */
   --topbar-h:     3.5rem;  /* 56px  */
-  --bottomnav-h:  4rem;    /* 64px  */
+  --bottomnav-h:  4.25rem; /* room reserved for the bottom bar (it sizes itself, ≈ 3.6rem) */
+  --bottomnav-gap: 0.75rem; /* space between the pill and the screen edges */
 }
 
 .dark {
@@ -44,7 +45,7 @@
   box-shadow: var(--shadow-card) !important;
 }
 
-/* ── Mobile top bar ────────────────────────────────────────── */
+/* ── Mobile top bar: logo + user menu ─────────────────────── */
 .top-bar {
   display: none;
   position: fixed;
@@ -63,95 +64,154 @@
   border-bottom-color: #334155;
 }
 
-/* ── Bottom navigation bar ─────────────────────────────────── */
+/* ── User menu (avatar in the top bar → panel with logout) ─── */
+.user-menu { position: relative; flex-shrink: 0; }
+/* Scoped under .user-menu: Tailwind's preflight (`button, [type='button']`, injected
+   after our stylesheets) would otherwise reset the background of the avatar button. */
+.user-menu .user-avatar {
+  width: 2.25rem; height: 2.25rem; border-radius: 999px; border: none;
+  display: flex; align-items: center; justify-content: center;
+  background: #4f46e5; color: #ffffff; font-size: 0.8125rem; font-weight: 700;
+  cursor: pointer; user-select: none; flex-shrink: 0;
+  transition: box-shadow 150ms ease;
+}
+.user-menu button.user-avatar:focus-visible,
+.user-menu button.user-avatar[aria-expanded="true"] { box-shadow: 0 0 0 3px rgba(99,102,241,0.35); }
+.user-menu-panel {
+  position: absolute; top: calc(100% + 0.5rem); right: 0; z-index: 40;
+  width: 15rem; padding: 0.5rem;
+  background: #ffffff; border: 1px solid #e5e7eb; border-radius: 1rem;
+  box-shadow: var(--shadow-raised);
+}
+.dark .user-menu-panel { background: #1e293b; border-color: #334155; }
+.user-menu-head {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.5rem 0.5rem 0.75rem; margin-bottom: 0.375rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.dark .user-menu-head { border-bottom-color: #334155; }
+.user-menu .user-menu-head .user-avatar { cursor: default; }
+.user-menu-name { font-size: 0.875rem; font-weight: 600; color: #0f172a; }
+.dark .user-menu-name { color: #f1f5f9; }
+.user-menu-hint { font-size: 0.75rem; color: #64748b; }
+.dark .user-menu-hint { color: #94a3b8; }
+.user-menu .user-menu-item {
+  width: 100%; display: flex; align-items: center; gap: 0.625rem;
+  padding: 0.625rem 0.75rem; border: none; border-radius: 0.625rem;
+  background: transparent; cursor: pointer; text-align: left;
+  font-size: 0.875rem; font-weight: 500; color: #334155;
+}
+.user-menu-item.danger { color: #dc2626; }
+.user-menu-item.danger:hover { background: #fef2f2; }
+.dark .user-menu-item.danger { color: #f87171; }
+.dark .user-menu-item.danger:hover { background: rgba(239,68,68,0.12); }
+
+/* ── Bottom navigation (phones): a floating rounded bar, filled, no border.
+   Each item is an icon with its label underneath. The active item sits on an
+   indicator inset by --bn-pad on every side, its radius = bar radius − --bn-pad
+   (concentric corners). Items have no gap between them, so the indicator's margin
+   is the bar padding all around. */
 .bottom-nav {
+  --bn-pad: 0.375rem;
+  --bn-radius: 1.5rem;
   display: none;
   position: fixed;
-  bottom: 0; left: 0; right: 0;
-  height: var(--bottomnav-h);
+  left: var(--bottomnav-gap); right: var(--bottomnav-gap);
+  bottom: calc(var(--bottomnav-gap) + env(safe-area-inset-bottom, 0px));
+  /* No fixed height: the bar wraps its items, so the padding (the indicator's margin)
+     is exactly --bn-pad above and below whatever the text size. */
+  padding: var(--bn-pad);
+  border-radius: var(--bn-radius);
   background: #ffffff;
-  border-top: 1px solid #e2e8f0;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.14), 0 2px 6px rgba(15,23,42,0.06);
   z-index: 30;
-  box-shadow: 0 -1px 8px rgba(0,0,0,0.06);
+  align-items: stretch;
 }
 .dark .bottom-nav {
   background: #1e293b;
-  border-top-color: #334155;
-}
-.bottom-nav-items {
-  display: flex;
-  height: 100%;
-  align-items: stretch;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
 }
 .bottom-nav-item {
   flex: 1;
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.2rem;
+  padding: 0.5rem 0.25rem;
+  border-radius: calc(var(--bn-radius) - var(--bn-pad));
   text-decoration: none;
   font-size: 0.625rem;
   font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: #94a3b8;
-  transition: color 120ms ease;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 0.5rem 0.25rem;
-  /* Ensure 44×44px touch target */
+  transition: color 200ms ease;
   min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
 }
-.bottom-nav-item i { font-size: 1.25rem; }
 .bottom-nav-item.active { color: #4f46e5; }
-.dark .bottom-nav-item.active { color: #818cf8; }
-.bottom-nav-item:hover { color: #4f46e5; }
-.dark .bottom-nav-item:hover { color: #818cf8; }
-.bottom-nav-item:focus-visible {
-  outline: 2px solid #6366f1;
-  outline-offset: -2px;
-  border-radius: 8px;
-}
+.dark .bottom-nav-item.active { color: #a5b4fc; }
+.bottom-nav-item:focus-visible { outline: 2px solid #6366f1; outline-offset: -2px; }
 
-/* ── Sidebar overlay (mobile backdrop) ─────────────────────── */
-#sidebar-overlay {
-  display: none;
-  position: fixed;
+.bottom-nav-indicator {
+  position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-  z-index: 45;
+  border-radius: inherit;
+  background: #eef2ff;
+  view-transition-name: bottom-nav-indicator;
 }
-#sidebar-overlay.visible { display: block; }
+.dark .bottom-nav-indicator { background: rgba(99,102,241,0.20); }
+
+.bottom-nav-content {
+  position: relative; /* above the indicator */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  line-height: 1; /* not the page's 1.5rem: keeps icon + label compact and predictable */
+}
+.bottom-nav-content i { font-size: 1.15rem; line-height: 1; }
+/* Each item's content is its own view-transition layer, painted above the indicator
+   while it slides (otherwise the moving indicator would cover the icons). */
+.bottom-nav-item:nth-child(1) .bottom-nav-content { view-transition-name: bottom-nav-item-1; }
+.bottom-nav-item:nth-child(2) .bottom-nav-content { view-transition-name: bottom-nav-item-2; }
+.bottom-nav-item:nth-child(3) .bottom-nav-content { view-transition-name: bottom-nav-item-3; }
+.bottom-nav-item:nth-child(4) .bottom-nav-content { view-transition-name: bottom-nav-item-4; }
+
+/* Indicator animation: during a bottom-nav navigation the browser morphs the indicator
+   from the old item to the new one; the page itself swaps instantly (no cross-fade). */
+::view-transition-group(bottom-nav-indicator) {
+  animation-duration: 380ms;
+  animation-timing-function: cubic-bezier(0.34, 1.3, 0.5, 1); /* slight overshoot */
+}
+::view-transition-group(*) { animation-duration: 380ms; }
+::view-transition-old(root),
+::view-transition-new(root) { animation: none; }
+/* Browsers without view transitions: the indicator pops in on the new page instead. */
+@supports not (view-transition-name: none) {
+  .bottom-nav-indicator { animation: bottom-nav-pop 260ms cubic-bezier(0.34, 1.3, 0.5, 1); }
+}
+@keyframes bottom-nav-pop {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  .bottom-nav-indicator { animation: none !important; }
+}
 
 /* ── Mobile responsive layout ──────────────────────────────── */
 @media (max-width: 1023px) {
   .bottom-nav { display: flex; }
   .top-bar    { display: flex; }
 
-  /* Content padding accounts for top bar + bottom nav */
+  /* Content padding accounts for the top bar and the floating bottom nav */
   .content-pad {
     padding-top: calc(var(--topbar-h) + 1rem) !important;
-    padding-bottom: calc(var(--bottomnav-h) + 1.25rem) !important;
+    padding-bottom: calc(var(--bottomnav-h) + var(--bottomnav-gap) + env(safe-area-inset-bottom, 0px) + 1rem) !important;
   }
 
-  /* Sidebar: slide in from the left */
-  #sidebar {
-    position: fixed !important;
-    top: 0;
-    left: 0;
-    height: 100dvh !important;
-    z-index: 50 !important;
-    transform: translateX(-100%);
-    transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
-    box-shadow: var(--shadow-overlay) !important;
-  }
-  #sidebar.sidebar-open {
-    transform: translateX(0);
-  }
+  /* No sidebar on phones/tablets: navigation is the bottom nav */
+  #sidebar { display: none !important; }
 
   /* Enlarge table action buttons for touch */
   .row-action {
@@ -181,7 +241,7 @@
 /* ── Toast: float above bottom nav on mobile ───────────────── */
 @media (max-width: 1023px) {
   #toast {
-    bottom: calc(var(--bottomnav-h) + 0.75rem) !important;
+    bottom: calc(var(--bottomnav-h) + var(--bottomnav-gap) + env(safe-area-inset-bottom, 0px) + 0.75rem) !important;
     right: 1rem !important;
     left: 1rem !important;
     text-align: center;
@@ -190,8 +250,10 @@
 
 }
 
-/* ── Modal → bottom sheet on mobile ────────────────────────── */
-@media (max-width: 767px) {
+/* ── Modal → bottom sheet on phones ───────────────────────── */
+/* Below 640px only (phones held upright). Above it — tablets, desktop browsers even
+   when zoomed in or not maximised — modals stay centred dialogs of --modal-width. */
+@media (max-width: 639px) {
   /* Overlay: push card to bottom */
   #modal-root {
     align-items: flex-end !important;
@@ -222,15 +284,7 @@
   }
   .dark .modal-sheet::before { background: #475569; }
 
-  /* Full-width action buttons in modals on mobile */
-  .modal-sheet .flex.gap-2.justify-end {
-    flex-direction: column-reverse !important;
-  }
-  .modal-sheet .flex.gap-2.justify-end button,
-  .modal-sheet .flex.flex-col.gap-2 button {
-    width: 100% !important;
-    justify-content: center !important;
-  }
+  /* (Footer buttons stack full-width on phones: see .modal-footer in components.css) */
 
   /* Input and button touch targets */
   .input, select.input { min-height: 2.75rem; }
@@ -281,3 +335,12 @@
 #modal-root:not(:has(> *)) { display: none; }
 body:has(#modal-root > *) { overflow: hidden; }
 #modal-root .modal-sheet { max-height: calc(100dvh - 2rem); overflow-y: auto; }
+/* Dialog width on tablets/desktop. Each modal sets --modal-width on its card (e.g.
+   style="--modal-width: 32rem"); defined here, not with Tailwind max-w-* classes, so it
+   applies even if Tailwind's in-browser script is slow or blocked. */
+@media (min-width: 640px) {
+  #modal-root > .modal-sheet {
+    width: 100%;
+    max-width: min(var(--modal-width, 32rem), 100%);
+  }
+}

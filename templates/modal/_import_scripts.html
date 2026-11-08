@@ -73,8 +73,6 @@ function refresh() {
   fileCount.textContent = queue.length + ' fichier(s)';
   var hasPending = queue.some(function(i) { return i.status === 'pending' || i.status === 'error'; });
   btnAnalyzeAll.disabled = !hasPending;
-  btnAnalyzeAll.style.opacity = hasPending ? '1' : '0.4';
-  btnAnalyzeAll.style.cursor  = hasPending ? 'pointer' : 'not-allowed';
 }
 
 function buildRow(item) {
@@ -223,20 +221,20 @@ function analyzeAll() {
 
 function errHtml(msg) {
   var lines = String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-  return '<div style="background:#fee2e2;border-left:4px solid #dc2626;border-radius:8px;padding:0.75rem 1rem;margin-top:4px">' +
-           '<p style="font-weight:700;color:#991b1b;margin:0 0 0.35rem"><i class="fas fa-circle-xmark" style="margin-right:0.4rem"></i>Erreur — importation annulée</p>' +
-           '<p style="font-size:0.875rem;color:#7f1d1d;margin:0 0 0.35rem;line-height:1.55">' + lines + '</p>' +
-           '<p style="font-size:0.8rem;color:#b91c1c;margin:0"><i class="fas fa-shield-halved" style="margin-right:0.3rem"></i>Le fichier n\'a pas été sauvegardé (ni dans la base de données, ni sur le disque).</p>' +
+  return '<div class="notice notice-error">' +
+           '<p class="notice-title"><i class="fas fa-circle-xmark"></i> Erreur — importation annulée</p>' +
+           '<p>' + lines + '</p>' +
+           '<p class="notice-hint"><i class="fas fa-shield-halved"></i> Le fichier n\'a pas été sauvegardé (ni dans la base de données, ni sur le disque).</p>' +
          '</div>';
 }
 
 function dupHtml(importedAt) {
-  return '<div style="background:#fef9c3;border-left:4px solid #f59e0b;border-radius:8px;padding:0.75rem 1rem">' +
-           '<p style="font-weight:700;color:#92400e;margin:0 0 0.35rem"><i class="fas fa-clock-rotate-left" style="margin-right:0.4rem"></i>Fichier déjà importé</p>' +
-           '<p style="font-size:0.875rem;color:#78350f;margin:0 0 0.75rem">Ce relevé a déjà été importé le <strong>' + esc(importedAt) + '</strong>.<br>Voulez-vous rechercher les transactions manquantes ou supprimées par erreur ?</p>' +
-           '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">' +
-             '<button class="btn-dup-reparse btn-primary" style="font-size:0.8rem;padding:0.35rem 0.85rem"><i class="fas fa-rotate" style="margin-right:0.3rem"></i>Oui — rechercher les transactions manquantes</button>' +
-             '<button class="btn-dup-skip btn-secondary" style="font-size:0.8rem;padding:0.35rem 0.85rem">Non, ignorer</button>' +
+  return '<div class="notice notice-warning">' +
+           '<p class="notice-title"><i class="fas fa-clock-rotate-left"></i> Fichier déjà importé</p>' +
+           '<p>Ce relevé a déjà été importé le <strong>' + esc(importedAt) + '</strong>. Voulez-vous rechercher les transactions manquantes ou supprimées par erreur ?</p>' +
+           '<div class="flex gap-2 flex-wrap mt-2">' +
+             '<button type="button" class="btn-dup-skip btn-secondary btn-sm">Non, ignorer</button>' +
+             '<button type="button" class="btn-dup-reparse btn-primary btn-sm"><i class="fas fa-rotate"></i> Rechercher les transactions manquantes</button>' +
            '</div>' +
          '</div>';
 }
