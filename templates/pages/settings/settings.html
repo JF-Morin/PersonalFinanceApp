@@ -1,0 +1,177 @@
+{% extends "layout/base.html" %}
+{% block title %}Paramètres — Finance Perso{% endblock %}
+
+{% block content %}
+<!--
+  Outer Alpine scope drives the user-edit modal.
+  Getters (pwFull, pwValid, profileChanged, canSave) keep the save button logic clean.
+-->
+<div id="settings-root" x-data="{
+  editModal: false,
+  editUser: { id: '', name: '', last_name: '', bank_id: '', hasPw: false },
+  origName: '', origLast: '', origBank: '',
+  oldPw: '', newPw: '', newPwc: '',
+  get pwFull() {
+    if (!this.editUser.hasPw)
+      return !!(this.newPw && this.newPwc && this.newPw === this.newPwc);
+    return !!(this.oldPw && this.newPw && this.newPwc && this.newPw === this.newPwc);
+  },
+  get pwEmpty() { return !this.oldPw && !this.newPw && !this.newPwc; },
+  get pwValid() { return this.pwEmpty || this.pwFull; },
+  get profileChanged() {
+    return this.editUser.name !== this.origName ||
+           this.editUser.last_name !== this.origLast ||
+           this.editUser.bank_id !== this.origBank;
+  },
+  get canSave() { return this.pwValid && (this.profileChanged || this.pwFull); }
+}">
+
+<div class="max-w-5xl mx-auto">
+
+<div class="page-header">
+  <h1>Paramètres</h1>
+</div>
+
+<div class="space-y-6">
+
+  <!-- App preferences — explicit save -->
+  {% include "pages/settings/_preferences.html" %}
+
+  <!-- Feedback banners -->
+    {% if pw_error %}
+  <div class="flex items-center gap-3 bg-red-50 dark:bg-red-900/30
+              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
+              text-red-700 dark:text-red-300 text-sm">
+    <i class="fas fa-circle-xmark flex-shrink-0"></i>
+    {% if pw_error == "wrong" %}Mot de passe actuel incorrect.
+    {% elif pw_error == "mismatch" %}Les nouveaux mots de passe ne correspondent pas.
+    {% else %}Une erreur est survenue.{% endif %}
+  </div>
+  {% endif %}
+
+  {% if user_error == "duplicate" %}
+  <div class="flex items-center gap-3 bg-red-50 dark:bg-red-900/30
+              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
+              text-red-700 dark:text-red-300 text-sm">
+    <i class="fas fa-circle-xmark flex-shrink-0"></i>
+    Un utilisateur avec ce prénom existe déjà.
+  </div>
+  {% endif %}
+
+  <!-- Users -->
+  <div class="card">
+    <h2 class="text-base font-semibold mb-5 flex items-center gap-2 text-gray-900 dark:text-gray-100">
+      <i class="fas fa-users text-primary-600"></i> Utilisateurs
+    </h2>
+
+    {% if users %}
+    <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-slate-600 mb-5">
+      <table class="w-full min-w-[40rem]">
+        <thead class="bg-gray-50 dark:bg-slate-700/60">
+          <tr class="border-b border-gray-200 dark:border-slate-600">
+            <th class="table-header">Prénom</th>
+            <th class="table-header">Nom</th>
+            <th class="table-header">Banque</th>
+            <th class="table-header">MDP</th>
+            <th class="table-header">Dernière connexion</th>
+            <th class="table-header w-36"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+          {% for u in users %}
+          {% include "pages/settings/_user_row.html" %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Add user form -->
+    <details class="group">
+      <summary class="flex items-center gap-2 cursor-pointer select-none list-none
+                      text-primary-600 dark:text-primary-400 text-sm font-semibold">
+        <i class="fas fa-plus-circle transition-transform duration-200 group-open:rotate-45"></i>
+        Ajouter un utilisateur
+      </summary>
+      <form action="/settings/users" method="POST"
+            class="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700
+                   grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="label">Prénom *</label>
+          <input type="text" name="name" required class="input">
+        </div>
+        <div>
+          <label class="label">Nom</label>
+          <input type="text" name="last_name" class="input">
+        </div>
+        <div>
+          <label class="label">Banque par défaut</label>
+          <select name="bank_id" class="input">
+            <option value="">— Aucune —</option>
+            {% for b in banks %}
+            <option value="{{ b.id }}">{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label">Mot de passe</label>
+          <input type="password" name="password" class="input" placeholder="Optionnel"
+                 autocomplete="new-password">
+        </div>
+        <div class="sm:col-span-2">
+          <button type="submit" class="btn-primary">
+            <i class="fas fa-plus"></i> Créer
+          </button>
+        </div>
+      </form>
+    </details>
+  </div>
+
+  <!-- Banks reference -->
+  <div class="card">
+    <h2 class="text-base font-semibold mb-4 flex items-center gap-2 text-gray-900 dark:text-gray-100">
+      <i class="fas fa-building-columns text-primary-600"></i> Banques supportées
+    </h2>
+    <ul class="space-y-2">
+      {% for b in banks %}
+      <li class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300">
+        <span class="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-check text-green-600 dark:text-green-400 text-[10px]"></i>
+        </span>
+        {{ b.name }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+</div><!-- /space-y-6 -->
+</div><!-- /max-w-5xl -->
+
+{% include "modal/user_edit.html" %}
+
+</div><!-- /x-data wrapper -->
+
+<script>
+function openUserEdit(btn) {
+  var n = btn.dataset.uname, l = btn.dataset.ulast, b = btn.dataset.ubank;
+  var comp = Alpine.$data(document.getElementById('settings-root'));
+  comp.editUser = { id: btn.dataset.uid, name: n, last_name: l, bank_id: b, hasPw: btn.dataset.uhaspw === '1' };
+  comp.origName = n; comp.origLast = l; comp.origBank = b;
+  comp.oldPw = ''; comp.newPw = ''; comp.newPwc = '';
+  comp.editModal = true;
+}
+
+document.addEventListener('htmx:afterSwap', function(e) {
+  if (e.detail.elt && e.detail.elt.id && e.detail.elt.id.startsWith('user-row-')) {
+    Alpine.initTree(e.detail.elt);
+  }
+});
+
+window.__appChangeHandler = function(evt) {
+  if (evt.actor_id === CURRENT_USER_ID) return;
+  if (evt.kind === 'settings') {
+    window.location.reload();
+  }
+};
+</script>
+{% endblock %}

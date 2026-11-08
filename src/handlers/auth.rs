@@ -1,3 +1,15 @@
+/// Authentication handlers — login, logout, and first-login password setup.
+///
+/// Session management is cookie-based: a plain `user_id=<id>` HTTP-only cookie.
+/// There are no JWT tokens or server-side sessions; the cookie value is trusted as-is
+/// (the cookie is not signed, so this is designed for a trusted home-network deployment).
+///
+/// Password hashing uses Argon2id via the `argon2` crate.  Passwords are never stored
+/// in plaintext — only the hash string is kept in `users.password_hash`.
+///
+/// Two login flows exist:
+///   • First login (password_hash IS NULL): user must set a password via the "set" modal.
+///   • Returning user (password_hash IS NOT NULL): password is verified against the stored hash.
 use axum::{
     extract::{Query, State},
     response::{Html, IntoResponse, Redirect},
@@ -18,15 +30,17 @@ use crate::{
     AppState,
 };
 
-/// Safe subset of User for the login template — never exposes password_hash.
+/// Safe subset of User sent to the login template — never exposes password_hash.
 #[derive(Serialize)]
 struct UserLoginView {
     id: i64,
     name: String,
     last_name: Option<String>,
+    /// True when the user already has a password set (determines which modal to show).
     has_password: bool,
 }
 
+/// Query parameters for the login page — used to surface error banners.
 #[derive(Deserialize, Default)]
 pub struct LoginQuery {
     pub error: Option<String>,
@@ -34,11 +48,13 @@ pub struct LoginQuery {
     pub user_error: Option<String>,
 }
 
+/// GET /login — show the login page, or redirect to / if already logged in.
 pub async fn get_login(
     State(state): State<AppState>,
     jar: CookieJar,
     Query(query): Query<LoginQuery>,
 ) -> AppResult<impl IntoResponse> {
+    // If a cookie is present, verify the user still exists in the DB.
     if let Some(cookie) = jar.get("user_id") {
         let uid: Option<i64> = cookie.value().parse().ok();
         let exists = if let Some(id) = uid {
@@ -63,11 +79,13 @@ pub async fn get_login(
     Ok(html.into_response())
 }
 
+/// Build and render the login page template with the list of users and banks.
 async fn render_login_page(state: &crate::AppState, query: &LoginQuery) -> AppResult<Html<String>> {
     let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
         .fetch_all(&state.db)
         .await?;
 
+    // Map to the safe view — strip the password hash before passing to the template.
     let user_views: Vec<UserLoginView> = users
         .into_iter()
         .map(|u| UserLoginView {
@@ -95,7 +113,7 @@ async fn render_login_page(state: &crate::AppState, query: &LoginQuery) -> AppRe
     ctx.insert("unauthorized", &query.unauthorized.is_some());
     ctx.insert("user_error", &query.user_error.as_deref().unwrap_or(""));
 
-    Ok(Html(state.tera.render("auth/login.html", &ctx)?))
+    Ok(Html(state.tera.render("pages/auth/login.html", &ctx)?))
 }
 
 #[derive(Deserialize)]
@@ -107,6 +125,7 @@ pub struct LoginForm {
     pub new_password: Option<String>,
 }
 
+/// POST /login — handle both the first-login (set password) and returning-user flows.
 pub async fn post_login(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -119,11 +138,12 @@ pub async fn post_login(
         .ok_or_else(|| AppError::Other("Utilisateur introuvable".into()))?;
 
     if user.password_hash.is_none() {
-        // First login: the user must set a password via the "set" modal.
+        // ── First login: user is setting their password for the first time ──────────
         let new_pw = form.new_password.as_deref().unwrap_or("");
         if new_pw.is_empty() {
             return Ok(Redirect::to("/login?error=1").into_response());
         }
+        // Generate a random salt and hash the password with Argon2id.
         let salt = SaltString::generate(&mut OsRng);
         let hash = Argon2::default()
             .hash_password(new_pw.as_bytes(), &salt)
@@ -136,7 +156,7 @@ pub async fn post_login(
             .await?;
         tracing::info!(user_id = %form.user_id, "Password set on first login");
     } else {
-        // Returning user: verify their existing password.
+        // ── Returning user: verify their existing password ───────────────────────────
         let submitted = form.password.as_deref().unwrap_or("");
         if submitted.is_empty() {
             return Ok(Redirect::to("/login?error=1").into_response());
@@ -149,11 +169,13 @@ pub async fn post_login(
         }
     }
 
+    // Record the login timestamp and set the session cookie.
     sqlx::query("UPDATE users SET last_login = datetime('now') WHERE id = ?")
         .bind(form.user_id)
         .execute(&state.db)
         .await?;
 
+    // `http_only` prevents JavaScript from reading the cookie — a small XSS mitigation.
     let cookie = Cookie::build(("user_id", form.user_id.to_string()))
         .path("/")
         .http_only(true)
@@ -162,6 +184,7 @@ pub async fn post_login(
     Ok((jar.add(cookie), Redirect::to("/")).into_response())
 }
 
+/// POST /logout — clear the session cookie and redirect to login.
 pub async fn post_logout(jar: CookieJar) -> impl IntoResponse {
     let jar = jar.remove(Cookie::build(("user_id", "")).path("/").build());
     (jar, Redirect::to("/login"))

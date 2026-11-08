@@ -1,11 +1,16 @@
-{% if transactions %}
-{% for t in transactions %}
-<tr id="tx-row-{{ t.id }}"
+<tr id="transaction-row-{{ t.id }}"
     data-date="{{ t.date }}"
     data-op="{{ t.operation }}"
     data-cat="{{ t.category_id | default(value='') }}"
     data-amount="{{ t.amount }}"
     class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
+  <td class="table-cell text-center" title="{% if t.is_manual %}Entrée manuelle{% else %}Importé PDF{% endif %}">
+    {% if t.is_manual %}
+    <i class="fas fa-file-pen text-gray-400 text-sm"></i>
+    {% else %}
+    <i class="fas fa-file-pdf text-red-400 text-sm"></i>
+    {% endif %}
+  </td>
   <td class="table-cell text-gray-500 whitespace-nowrap border-l-4 {% if t.status_name == 'complete' %}border-transparent{% else %}border-amber-400{% endif %}">{{ t.date }}</td>
   <td class="table-cell max-w-xs truncate" title="{{ t.operation }}">{{ t.operation }}</td>
   <td class="table-cell">
@@ -38,7 +43,7 @@
   <td class="table-cell">
     {% if t.owner_id == current_user_id %}
     <div class="flex items-center gap-1 justify-end">
-      <button class="btn-edit-tx w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-gray-400 dark:text-slate-400"
+      <button class="btn-edit-transaction w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-gray-400 dark:text-slate-400"
               data-id="{{ t.id }}"
               data-date="{{ t.date }}"
               data-operation="{{ t.operation }}"
@@ -54,7 +59,7 @@
               onmouseleave="this.style.color='';this.style.background=''">
         <i class="fas fa-pen text-xs"></i>
       </button>
-      <button class="btn-del-tx w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400 dark:text-red-400"
+      <button class="btn-delete-transaction w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400 dark:text-red-400"
               data-id="{{ t.id }}"
               data-operation="{{ t.operation }}"
               data-date="{{ t.date }}"
@@ -71,12 +76,3 @@
     {% endif %}
   </td>
 </tr>
-{% endfor %}
-{% else %}
-<tr>
-  <td colspan="8" class="text-center py-12 text-gray-400">
-    <i class="fas fa-inbox text-4xl mb-3 block"></i>
-    Aucune transaction.
-  </td>
-</tr>
-{% endif %}

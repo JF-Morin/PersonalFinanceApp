@@ -1,12 +1,21 @@
+/// Application configuration loaded from environment variables at startup.
+/// Values fall back to sensible defaults so the app works out of the box
+/// without a `.env` file (useful for `cargo run` during development).
 use std::env;
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// SQLite connection string, e.g. `sqlite:./data/finance.db`.
     pub database_url: String,
+    /// Root directory for uploaded PDFs (`storage/Statements/<BankName>/`).
     pub storage_path: String,
+    /// Directory for daily rolling log files.
     pub log_path: String,
+    /// Bind address — `0.0.0.0` to accept connections from all interfaces (needed in Docker).
     pub server_host: String,
+    /// TCP port the HTTP server listens on.
     pub server_port: u16,
+    /// Secret used to sign session cookies.  Change this in production.
     pub cookie_secret: String,
 }
 

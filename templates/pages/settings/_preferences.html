@@ -1,0 +1,67 @@
+<div class="card">
+  <h2 class="text-base font-semibold mb-5 flex items-center gap-2 text-gray-900 dark:text-gray-100">
+    <i class="fas fa-sliders text-primary-600"></i> Préférences
+  </h2>
+  <form id="pref-form"
+        hx-post="/settings"
+        hx-trigger="submit"
+        hx-swap="none"
+        class="space-y-4">
+    <div>
+      <label class="label">Thème</label>
+      <select name="theme" id="pref-theme" class="input"
+              onchange="document.documentElement.classList.toggle('dark', this.value === 'dark')">
+        <option value="light" {% if not is_dark %}selected{% endif %}>Clair</option>
+        <option value="dark"  {% if is_dark %}selected{% endif %}>Sombre</option>
+      </select>
+    </div>
+    <div>
+      <label class="label">Devise par défaut</label>
+      <select name="default_currency_id" id="pref-currency" class="input">
+        {% for c in currencies %}
+        <option value="{{ c.id }}" {% if c.id == default_currency_id %}selected{% endif %}>
+          {{ c.name }} ({{ c.symbol }})
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="pref-saved" class="hidden items-center gap-2 text-green-600 dark:text-green-400 text-sm font-medium">
+      <i class="fas fa-check-circle"></i> Sauvegardé
+    </div>
+    <div class="flex gap-3 pt-1">
+      <button type="button" id="pref-cancel"
+              class="flex-1 py-2.5 rounded-lg text-sm font-semibold
+                     bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600
+                     text-gray-700 dark:text-gray-200 border-none cursor-pointer transition-colors">
+        Annuler
+      </button>
+      <button type="submit"
+              class="flex-1 btn-primary py-2.5 justify-center">
+        <i class="fas fa-check mr-1"></i> Enregistrer
+      </button>
+    </div>
+  </form>
+  <script>
+    (function() {
+      var origTheme    = document.getElementById('pref-theme').value;
+      var origCurrency = document.getElementById('pref-currency').value;
+
+      document.getElementById('pref-cancel').addEventListener('click', function() {
+        var t = document.getElementById('pref-theme');
+        var c = document.getElementById('pref-currency');
+        t.value = origTheme;
+        c.value = origCurrency;
+        document.documentElement.classList.toggle('dark', origTheme === 'dark');
+      });
+
+      htmx.on('#pref-form', 'htmx:afterRequest', function() {
+        origTheme    = document.getElementById('pref-theme').value;
+        origCurrency = document.getElementById('pref-currency').value;
+        var el = document.getElementById('pref-saved');
+        el.classList.remove('hidden');
+        el.classList.add('flex');
+        setTimeout(function() { el.classList.add('hidden'); el.classList.remove('flex'); }, 2000);
+      });
+    })();
+  </script>
+</div>

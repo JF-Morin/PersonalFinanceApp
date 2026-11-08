@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr" class="{% if is_dark %}dark{% endif %}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connexion — Finance Perso</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icon.png">
+  <link rel="preconnect" href="https://fonts.bunny.net">
+  <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'] } } }
+  }</script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/login.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+
+<!--
+  Single x-data scope wrapping the whole page so user-list buttons and the
+  modal overlay share the same state without cross-scope event dispatch.
+    modal: null | 'verify' | 'set' | 'create'
+    sel:   null | { id, name }
+    pw, pwc, cpw, cpwc, cname, clast, cbank — controlled inputs
+-->
+<body class="bg-gray-50 dark:bg-slate-900 min-h-screen flex items-center justify-center p-4 font-sans"
+      x-data="{ modal: null, sel: null, pw: '', pwc: '', cpw: '', cpwc: '', cname: '', clast: '', cbank: '' }">
+
+<div class="w-full max-w-sm">
+
+  <!-- App identity -->
+  <div class="text-center mb-8">
+    <div class="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
+      <i class="fas fa-wallet text-2xl text-white"></i>
+    </div>
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">Finance Perso</h1>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+      {% if users %}Sélectionnez votre profil{% else %}Bienvenue !{% endif %}
+    </p>
+  </div>
+
+  {% if unauthorized %}
+  <div class="mb-4 flex items-center gap-3 bg-amber-50 dark:bg-amber-900/30
+              border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3
+              text-amber-700 dark:text-amber-300 text-sm">
+    <i class="fas fa-lock flex-shrink-0"></i>
+    Accès refusé. Connectez-vous pour accéder à cette page.
+  </div>
+  {% endif %}
+
+  {% if user_error == "duplicate" %}
+  <div class="mb-4 flex items-center gap-3 bg-red-50 dark:bg-red-900/30
+              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
+              text-red-700 dark:text-red-300 text-sm">
+    <i class="fas fa-circle-xmark flex-shrink-0"></i>
+    Un profil avec ce prénom existe déjà.
+  </div>
+  {% endif %}
+
+  {% if login_error %}
+  <div class="mb-4 flex items-center gap-3 bg-red-50 dark:bg-red-900/30
+              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
+              text-red-700 dark:text-red-300 text-sm">
+    <i class="fas fa-circle-xmark flex-shrink-0"></i>
+    Mot de passe incorrect. Réessayez.
+  </div>
+  {% endif %}
+
+  <!-- Main card -->
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6">
+
+    {% if users %}
+    <!-- ── User selection list ──────────────────────────────── -->
+    <div class="space-y-2">
+      {% for user in users %}
+
+      {% if user.has_password %}
+      <!-- Returning user → verify password modal -->
+      <button type="button" class="user-btn"
+              @click="sel = { id: {{ user.id }}, name: '{{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}' }; pw = ''; modal = 'verify'">
+        <span class="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 flex items-center
+                     justify-center text-indigo-600 dark:text-indigo-400 font-bold flex-shrink-0 text-sm">
+          {{ user.name | upper | truncate(length=1, end="") }}
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+            {{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}
+          </div>
+          <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            <i class="fas fa-lock text-[10px] mr-0.5"></i> Protégé
+          </div>
+        </div>
+        <i class="fas fa-chevron-right text-gray-300 dark:text-slate-600 text-xs"></i>
+      </button>
+
+      {% else %}
+      <!-- First login → set password modal -->
+      <button type="button" class="user-btn amber"
+              @click="sel = { id: {{ user.id }}, name: '{{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}' }; pw = ''; pwc = ''; modal = 'set'">
+        <span class="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/50 flex items-center
+                     justify-center text-amber-600 dark:text-amber-400 font-bold flex-shrink-0 text-sm">
+          {{ user.name | upper | truncate(length=1, end="") }}
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+            {{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}
+          </div>
+          <div class="text-xs text-amber-500 dark:text-amber-400 mt-0.5">
+            <i class="fas fa-triangle-exclamation text-[10px] mr-0.5"></i> Mot de passe à définir
+          </div>
+        </div>
+        <i class="fas fa-chevron-right text-gray-300 dark:text-slate-600 text-xs"></i>
+      </button>
+      {% endif %}
+
+      {% endfor %}
+    </div>
+
+    <!-- ── Create new profile button (when users already exist) ── -->
+    <div class="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
+      <button type="button" class="btn-full-indigo"
+              style="background-color:#64748b"
+              @click="cname=''; clast=''; cbank=''; cpw=''; cpwc=''; modal='create'">
+        <i class="fas fa-user-plus"></i> Créer un profil
+      </button>
+    </div>
+
+    {% else %}
+    <!-- ── First run: create first user ────────────────────── -->
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 leading-relaxed">
+      Aucun profil n'existe encore. Créez le vôtre pour commencer.
+    </p>
+
+    <form action="/settings/users" method="POST"
+          x-data="{ fpw: '', fpwc: '' }"
+          class="space-y-4">
+      <input type="hidden" name="redirect_to" value="/login">
+
+      <div>
+        <label class="lbl">Prénom *</label>
+        <input type="text" name="name" required class="field" placeholder="ex : Jean"
+               autocomplete="given-name">
+      </div>
+      <div>
+        <label class="lbl">Nom</label>
+        <input type="text" name="last_name" class="field" placeholder="Optionnel"
+               autocomplete="family-name">
+      </div>
+      {% if banks %}
+      <div>
+        <label class="lbl">Banque</label>
+        <select name="bank_id" class="field">
+          <option value="">— Aucune —</option>
+          {% for b in banks %}
+          <option value="{{ b.id }}">{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div>
+        <label class="lbl">Mot de passe *</label>
+        <input type="password" name="password" required x-model="fpw"
+               class="field" placeholder="Choisissez un mot de passe"
+               autocomplete="new-password">
+      </div>
+      <div>
+        <label class="lbl">Confirmer le mot de passe *</label>
+        <input type="password" name="password_confirm" x-model="fpwc"
+               class="field" placeholder="Répétez le mot de passe"
+               autocomplete="new-password">
+        <p x-show="fpwc.length > 0 && fpw !== fpwc" x-cloak
+           class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+          <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+        </p>
+      </div>
+
+      <button type="submit" class="btn-full-indigo" :disabled="!fpw || fpw !== fpwc">
+        <i class="fas fa-user-plus"></i> Créer mon profil
+      </button>
+    </form>
+    {% endif %}
+
+  </div><!-- /card -->
+</div><!-- /centered wrapper -->
+
+
+{% include "modal/login.html" %}
+
+</body>
+</html>

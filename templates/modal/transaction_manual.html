@@ -1,0 +1,106 @@
+<div id="manual-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px)"
+     class="flex items-center justify-center p-4">
+  <div class="modal-sheet card max-w-3xl w-full">
+    <h2 class="text-lg font-semibold mb-4">Ajouter une transaction</h2>
+    <form id="manual-form"
+          class="grid grid-cols-2 gap-3"
+          hx-post="/transactions/manual"
+          hx-swap="none">
+      <input type="hidden" name="shares_json" id="manual-shares-json">
+      <div>
+        <label class="label">Date</label>
+        <input type="date" name="date" id="manual-date" required class="input w-full">
+      </div>
+      <div class="col-span-2">
+        <label class="label">Opération</label>
+        <input type="text" name="operation" required placeholder="Description" class="input w-full">
+      </div>
+      <div>
+        <label class="label">Montant (négatif = dépense)</label>
+        <input type="number" name="amount" step="0.01" required class="input w-full">
+      </div>
+      <div>
+        <label class="label">Devise</label>
+        <select name="currency_id" class="input w-full">
+          {% for c in currencies | default(value=[]) %}
+          <option value="{{ c.id }}" {% if c.id == default_currency_id %}selected{% endif %}>
+            {{ c.name }} ({{ c.symbol }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label">Catégorie</label>
+        <select name="category_id" class="input w-full">
+          <option value="">— Optionnel —</option>
+          {% for c in categories | default(value=[]) %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-span-2">
+        <label class="label">Notes</label>
+        <input type="text" name="notes" class="input w-full" placeholder="Optionnel">
+      </div>
+
+      <div class="col-span-2">
+        {% set share_prefix = "manual" %}
+        {% include "modal/_shares_field.html" %}
+      </div>
+
+      <div id="manual-server-error" class="col-span-2 text-sm text-red-500 rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2" style="display:none"></div>
+      <div class="col-span-2 flex gap-2 justify-end mt-1">
+        <button type="button" id="manual-cancel" class="btn-secondary">Annuler</button>
+        <button type="submit" class="btn-primary"><i class="fas fa-save mr-1"></i> Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// htmx:configRequest fires before HTMX serializes the request body — only here
+// can we reliably inject into e.detail.parameters (the live params object).
+// htmx:beforeRequest fires after serialization and is only used for cancellation.
+var _manualSharesTotal = 0;
+
+document.getElementById('manual-form').addEventListener('htmx:configRequest', function(e) {
+  var total = 0;
+  var shares = [];
+  document.querySelectorAll('#manual-shares-list .share-inline-input').forEach(function(inp) {
+    var v = parseFloat(inp.value) || 0;
+    total += v;
+    if (v > 0) shares.push({ user_id: parseInt(inp.dataset.userId), share: v });
+  });
+  _manualSharesTotal = total;
+  e.detail.parameters['shares_json'] = JSON.stringify(shares);
+});
+
+document.getElementById('manual-form').addEventListener('htmx:beforeRequest', function(e) {
+  if (_manualSharesTotal > 100.001) {
+    e.preventDefault();
+    var errEl = document.getElementById('manual-share-error');
+    errEl.textContent = 'La somme des parts ne peut pas dépasser 100 %.';
+    errEl.style.display = '';
+  }
+});
+
+document.getElementById('manual-form').addEventListener('htmx:afterRequest', function(e) {
+  if (e.detail.successful) {
+    document.getElementById('manual-modal').style.display = 'none';
+    document.getElementById('manual-form').reset();
+    document.getElementById('manual-share-error').style.display = 'none';
+    document.getElementById('manual-server-error').style.display = 'none';
+    window.showTransactionToast && showTransactionToast('Transaction ajoutée.');
+    window.syncPendingAfterSave && syncPendingAfterSave();
+    // Explicitly trigger a full table refresh instead of relying on SSE timing.
+    // The SSE and the POST response were racing for the tbody, causing the SSE
+    // trigger to be dropped. With hx-swap="none" on the form, the tbody is never
+    // "busy" from the POST, and this call reliably refreshes after the round-trip.
+    window.refreshTransactionTable && refreshTransactionTable();
+  } else {
+    var errEl = document.getElementById('manual-server-error');
+    errEl.textContent = e.detail.xhr.responseText || 'Erreur serveur.';
+    errEl.style.display = '';
+  }
+});
+</script>

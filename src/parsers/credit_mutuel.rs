@@ -29,7 +29,7 @@ impl BankParser for CreditMutuelParser {
         let skip_re = Regex::new(
             r"(?i)(solde\s+cr[eé]diteur|solde\s+d[eé]biteur|total\s+mensuel|total\s+des\s+frais|r[eé]f\s*:)",
         )?;
-        let tx_start_re = Regex::new(r"^(\d{2}/\d{2}/\d{4})\s")?;
+        let transaction_start_re = Regex::new(r"^(\d{2}/\d{2}/\d{4})\s")?;
 
         let mut transactions: Vec<ParsedTransaction> = Vec::new();
         let mut pending: Option<(String, String, f64, Vec<String>, Option<String>)> = None;
@@ -57,7 +57,7 @@ impl BankParser for CreditMutuelParser {
                     let amount = if spacing_len >= 6 { abs_amount } else { -abs_amount };
                     pending = Some((date, valeur, amount, vec![op_text], None));
                 }
-            } else if let Some(sc) = tx_start_re.captures(line) {
+            } else if let Some(sc) = transaction_start_re.captures(line) {
                 // Date-prefixed line that didn't match the full transaction regex → broken.
                 flush(&mut pending, &mut transactions);
                 let date = convert_date(&sc[1]);
@@ -283,42 +283,42 @@ Réf : 005 SOLDE CREDITEUR AU 01/06/2026       16.368,49";
     #[test]
     fn parses_sample() {
         let p = CreditMutuelParser;
-        let txs = p.parse(SAMPLE).expect("parse");
+        let transactions = p.parse(SAMPLE).expect("parse");
 
-        assert_eq!(txs.len(), 7, "expected 7 transactions in sample");
+        assert_eq!(transactions.len(), 7, "expected 7 transactions in sample");
 
         // Simple debit
-        assert_eq!(txs[0].date, "2026-05-02");
-        assert_eq!(txs[0].transaction_date, "2026-05-02");
-        assert_eq!(txs[0].operation, "VIR SEPA LOYER MAI 2026");
-        assert!((txs[0].amount + 980.00).abs() < 0.01);
+        assert_eq!(transactions[0].date, "2026-05-02");
+        assert_eq!(transactions[0].transaction_date, "2026-05-02");
+        assert_eq!(transactions[0].operation, "VIR SEPA LOYER MAI 2026");
+        assert!((transactions[0].amount + 980.00).abs() < 0.01);
 
         // Debit with continuation merchant line
-        assert_eq!(txs[2].date, "2026-05-04");
-        assert!(txs[2].operation.contains("PAIEMENT PSC 0205 GRENOBLE"));
-        assert!(txs[2].operation.contains("AU VIEUX CAMPEUR CARTE 4212"), "continuation appended");
-        assert!((txs[2].amount + 39.95).abs() < 0.01);
+        assert_eq!(transactions[2].date, "2026-05-04");
+        assert!(transactions[2].operation.contains("PAIEMENT PSC 0205 GRENOBLE"));
+        assert!(transactions[2].operation.contains("AU VIEUX CAMPEUR CARTE 4212"), "continuation appended");
+        assert!((transactions[2].amount + 39.95).abs() < 0.01);
 
         // Debit with different valeur date
-        assert_eq!(txs[3].date, "2026-05-07");
-        assert_eq!(txs[3].transaction_date, "2026-05-01");
-        assert!((txs[3].amount + 9.40).abs() < 0.01);
+        assert_eq!(transactions[3].date, "2026-05-07");
+        assert_eq!(transactions[3].transaction_date, "2026-05-01");
+        assert!((transactions[3].amount + 9.40).abs() < 0.01);
 
         // Credit with dot-thousands separator and continuation
-        assert_eq!(txs[4].date, "2026-05-10");
-        assert!(txs[4].operation.contains("VIR INST JEAN-FRANCOIS MOIN"));
-        assert!(txs[4].operation.contains("REMBOURSEMENT PARTIEL 1"), "continuation appended");
-        assert!((txs[4].amount - 3000.00).abs() < 0.01, "credit should be positive");
+        assert_eq!(transactions[4].date, "2026-05-10");
+        assert!(transactions[4].operation.contains("VIR INST JEAN-FRANCOIS MOIN"));
+        assert!(transactions[4].operation.contains("REMBOURSEMENT PARTIEL 1"), "continuation appended");
+        assert!((transactions[4].amount - 3000.00).abs() < 0.01, "credit should be positive");
 
         // Debit with long card number in operation
-        assert!(txs[5].operation.contains("493518627463"));
-        assert!(txs[5].operation.contains("MOL*EXTREMTEXTIL CARTE 4212"), "continuation appended");
-        assert!((txs[5].amount + 99.42).abs() < 0.01);
+        assert!(transactions[5].operation.contains("493518627463"));
+        assert!(transactions[5].operation.contains("MOL*EXTREMTEXTIL CARTE 4212"), "continuation appended");
+        assert!((transactions[5].amount + 99.42).abs() < 0.01);
 
         // Salary credit
-        assert_eq!(txs[6].date, "2026-05-28");
-        assert_eq!(txs[6].operation, "VIR AMETEK SAS");
-        assert!((txs[6].amount - 3013.15).abs() < 0.01, "credit should be positive");
+        assert_eq!(transactions[6].date, "2026-05-28");
+        assert_eq!(transactions[6].operation, "VIR AMETEK SAS");
+        assert!((transactions[6].amount - 3013.15).abs() < 0.01, "credit should be positive");
     }
 
     #[test]

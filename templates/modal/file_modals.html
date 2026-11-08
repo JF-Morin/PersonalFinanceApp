@@ -1,0 +1,95 @@
+<div id="delete-modal"
+     style="display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.5)"
+     class="flex items-center justify-center p-4">
+  <div class="modal-sheet card max-w-xl w-full">
+    <h2 class="text-lg font-semibold mb-2">Supprimer le fichier</h2>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">
+      <i class="fas fa-file-pdf text-red-400 mr-1"></i>
+      <span id="del-modal-filename" class="font-medium text-gray-900 dark:text-white"></span>
+    </p>
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 mt-3">
+      Voulez-vous également supprimer les
+      <strong id="del-modal-row-count"></strong> transactions associées à ce fichier ?
+    </p>
+    <div class="flex flex-col gap-2">
+      <button id="btn-delete-with-transactions"
+              hx-swap="outerHTML delete"
+              class="btn-primary w-full justify-center"
+              style="background:#dc2626; border-color:#dc2626">
+        <i class="fas fa-trash mr-2"></i> Oui — supprimer le fichier <em>et</em> les transactions
+      </button>
+      <button id="btn-delete-file-only"
+              hx-swap="outerHTML delete"
+              class="btn-secondary w-full justify-center">
+        <i class="fas fa-file-slash mr-2"></i> Non — supprimer le fichier uniquement
+      </button>
+      <button id="btn-cancel-delete"
+              class="btn-secondary w-full justify-center mt-1">
+        Annuler
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+document.getElementById('btn-cancel-delete').addEventListener('click', function() {
+  document.getElementById('delete-modal').style.display = 'none';
+});
+document.getElementById('delete-modal').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+
+['btn-delete-with-transactions', 'btn-delete-file-only'].forEach(function(id) {
+  document.getElementById(id).addEventListener('htmx:afterRequest', function(e) {
+    document.getElementById('delete-modal').style.display = 'none';
+    if (!e.detail.successful) {
+      window.showFileToast && showFileToast('Erreur : ' + (e.detail.xhr.responseText || 'Suppression échouée'), false);
+    }
+  });
+});
+</script>
+
+<div id="reparse-modal"
+     style="display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.5)"
+     class="flex items-center justify-center p-4">
+  <div class="modal-sheet card max-w-lg w-full">
+    <h2 class="text-lg font-semibold mb-2">
+      <i class="fas fa-rotate text-indigo-500 mr-2"></i>Réanalyser le fichier
+    </h2>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">
+      <i class="fas fa-file-pdf text-red-400 mr-1"></i>
+      <span id="reparse-modal-filename" class="font-medium text-gray-900 dark:text-white"></span>
+    </p>
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 mt-3">
+      Le fichier sera réanalysé et les transactions manquantes ou supprimées par erreur seront
+      ajoutées automatiquement. Les transactions existantes ne seront pas modifiées.
+    </p>
+    <div class="flex flex-col gap-2">
+      <button id="btn-confirm-reparse"
+              hx-swap="none"
+              class="btn-primary w-full justify-center">
+        <i class="fas fa-rotate mr-2"></i> Oui — rechercher les transactions manquantes
+      </button>
+      <button id="btn-cancel-reparse"
+              class="btn-secondary w-full justify-center mt-1">
+        Annuler
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+document.getElementById('btn-cancel-reparse').addEventListener('click', function() {
+  document.getElementById('reparse-modal').style.display = 'none';
+});
+document.getElementById('reparse-modal').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+
+document.getElementById('btn-confirm-reparse').addEventListener('htmx:afterRequest', function(e) {
+  document.getElementById('reparse-modal').style.display = 'none';
+  if (!e.detail.successful) {
+    window.showFileToast && showFileToast('Erreur : ' + (e.detail.xhr.responseText || 'Réanalyse échouée'), false);
+  }
+});
+</script>

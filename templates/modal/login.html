@@ -1,0 +1,141 @@
+<!-- Modal overlay (fixed, covers viewport) — all three panels share Alpine state from parent x-data -->
+<div x-show="modal !== null"
+     x-cloak
+     class="fixed inset-0 z-50 flex items-center justify-center p-4">
+
+  <!-- Backdrop -->
+  <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+       @click="modal = null"></div>
+
+  <!-- Modal card -->
+  <div class="relative w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6"
+       @click.stop>
+
+    <!-- User identity chip (shown for verify/set panels) -->
+    <div class="flex items-center gap-3 mb-5">
+      <span class="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg flex-shrink-0"
+            :class="modal === 'set'
+              ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400'
+              : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400'"
+            x-text="sel ? sel.name.charAt(0).toUpperCase() : ''">
+      </span>
+      <div>
+        <div class="font-bold text-gray-900 dark:text-gray-100 text-sm"
+             x-text="sel ? sel.name : ''"></div>
+        <div class="text-xs mt-0.5"
+             :class="modal === 'set' ? 'text-amber-500 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'"
+             x-text="modal === 'set' ? 'Définissez votre mot de passe' : 'Entrez votre mot de passe'">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Create profile panel ── -->
+    <div x-show="modal === 'create'">
+      <div class="flex items-center gap-2 mb-5">
+        <span class="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center
+                     justify-center text-slate-500 dark:text-slate-300 flex-shrink-0">
+          <i class="fas fa-user-plus text-lg"></i>
+        </span>
+        <div>
+          <div class="font-bold text-gray-900 dark:text-gray-100 text-sm">Nouveau profil</div>
+          <div class="text-xs text-gray-400 mt-0.5">Remplissez les informations ci-dessous</div>
+        </div>
+      </div>
+      <form action="/settings/users" method="POST" class="space-y-3">
+        <input type="hidden" name="redirect_to" value="/login">
+        <div>
+          <label class="lbl">Prénom *</label>
+          <input type="text" name="name" required x-model="cname"
+                 class="field" placeholder="ex : Jean" autocomplete="given-name">
+        </div>
+        <div>
+          <label class="lbl">Nom</label>
+          <input type="text" name="last_name" x-model="clast"
+                 class="field" placeholder="Optionnel" autocomplete="family-name">
+        </div>
+        {% if banks %}
+        <div>
+          <label class="lbl">Banque</label>
+          <select name="bank_id" x-model="cbank" class="field">
+            <option value="">— Aucune —</option>
+            {% for b in banks %}
+            <option value="{{ b.id }}">{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+        <div>
+          <label class="lbl">Mot de passe *</label>
+          <input type="password" name="password" required x-model="cpw"
+                 class="field" placeholder="Choisissez un mot de passe" autocomplete="new-password">
+        </div>
+        <div>
+          <label class="lbl">Confirmer *</label>
+          <input type="password" name="password_confirm" x-model="cpwc"
+                 class="field" placeholder="Répétez le mot de passe" autocomplete="new-password">
+          <p x-show="cpwc.length > 0 && cpw !== cpwc" x-cloak
+             class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+            <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+          </p>
+        </div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" @click="modal = null" class="btn-ghost">Annuler</button>
+          <button type="submit" class="btn-indigo" :disabled="!cname || !cpw || cpw !== cpwc">
+            <i class="fas fa-user-plus"></i> Créer
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ── Verify password panel ── -->
+    <div x-show="modal === 'verify'">
+      <form action="/login" method="POST">
+        <input type="hidden" name="user_id" :value="sel ? sel.id : ''">
+        <div class="mb-4">
+          <label class="lbl">Mot de passe</label>
+          <input type="password" name="password" x-model="pw"
+                 class="field" placeholder="••••••••" required
+                 autocomplete="current-password">
+        </div>
+        <div class="flex gap-3">
+          <button type="button" @click="modal = null" class="btn-ghost">Annuler</button>
+          <button type="submit" class="btn-indigo">
+            <i class="fas fa-arrow-right-to-bracket"></i> Connexion
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ── Set password panel (first login) ── -->
+    <div x-show="modal === 'set'">
+      <form action="/login" method="POST">
+        <input type="hidden" name="user_id" :value="sel ? sel.id : ''">
+        <div class="space-y-3 mb-4">
+          <div>
+            <label class="lbl">Nouveau mot de passe</label>
+            <input type="password" name="new_password" x-model="pw"
+                   class="field" placeholder="Choisissez un mot de passe" required
+                   autocomplete="new-password">
+          </div>
+          <div>
+            <label class="lbl">Confirmer</label>
+            <input type="password" name="new_password_confirm" x-model="pwc"
+                   class="field" placeholder="Répétez le mot de passe"
+                   autocomplete="new-password">
+            <p x-show="pwc.length > 0 && pw !== pwc" x-cloak
+               class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+              <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+            </p>
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <button type="button" @click="modal = null" class="btn-ghost">Annuler</button>
+          <button type="submit" class="btn-amber" :disabled="!pw || pw !== pwc">
+            <i class="fas fa-key"></i> Définir &amp; se connecter
+          </button>
+        </div>
+      </form>
+    </div>
+
+  </div><!-- /modal card -->
+</div><!-- /modal overlay -->

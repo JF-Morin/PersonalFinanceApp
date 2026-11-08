@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fr" class="{% if is_dark %}dark{% endif %}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Finance Perso{% endblock %}</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icon.png">
+
+  <link rel="preconnect" href="https://fonts.bunny.net">
+  <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&family=jetbrains-mono:400,500,600,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+          fontSize: {
+            'xs':   ['0.75rem',  { lineHeight: '1rem'    }],
+            'sm':   ['0.875rem', { lineHeight: '1.25rem' }],
+            'base': ['1rem',     { lineHeight: '1.5rem'  }],
+            'lg':   ['1.125rem', { lineHeight: '1.75rem' }],
+            'xl':   ['1.25rem',  { lineHeight: '1.75rem' }],
+            '2xl':  ['1.5rem',   { lineHeight: '2rem'    }],
+            '3xl':  ['1.875rem', { lineHeight: '2.25rem' }],
+            '4xl':  ['2.25rem',  { lineHeight: '2.5rem'  }],
+          },
+          colors: {
+            primary: {
+              50:  '#eef2ff',
+              100: '#e0e7ff',
+              200: '#c7d2fe',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#312e81',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.11/dist/htmx.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.4/sse.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  {% block head %}{% endblock %}
+</head>
+
+<body class="bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-gray-100 font-sans text-base"
+      {% if current_user %}hx-ext="sse" sse-connect="/events"{% endif %}>
+
+<!-- Mobile top bar (hidden on desktop via app.css) -->
+<header class="top-bar dark:bg-slate-800 dark:border-slate-700">
+  <button id="btn-sidebar-open" aria-label="Ouvrir le menu">
+    <i class="fas fa-bars"></i>
+  </button>
+  <a href="/" class="flex items-center gap-2 flex-1 min-w-0 no-underline" style="text-decoration:none;">
+    <span class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0"
+          style="box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+      <i class="fas fa-wallet text-white" style="font-size:0.75rem;"></i>
+    </span>
+    <span class="font-bold text-sm text-primary-600 dark:text-primary-400 truncate">Finance Perso</span>
+  </a>
+  {% if current_user %}
+  <span class="w-8 h-8 rounded-full bg-primary-600 text-white text-xs font-bold
+               flex items-center justify-center flex-shrink-0 select-none">
+    {{ current_user.name | upper | truncate(length=1, end="") }}
+  </span>
+  {% endif %}
+</header>
+
+<!-- Sidebar backdrop (mobile) -->
+<div id="sidebar-overlay"></div>
+
+<!-- Layout wrapper -->
+<div class="flex">
+
+  <!-- Sidebar — MD3 Navigation Drawer -->
+  {% include "layout/_sidebar.html" %}
+
+  <!-- Main content area -->
+  <main class="flex-1 min-w-0">
+    <div class="content-pad p-4 lg:p-6">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+</div>
+
+<!-- Bottom navigation (mobile only, shown via app.css) -->
+<nav class="bottom-nav" aria-label="Navigation principale">
+  <div class="bottom-nav-items">
+    <a href="/" class="bottom-nav-item">
+      <i class="fas fa-home"></i>
+      <span>Accueil</span>
+    </a>
+    <a href="/transactions" class="bottom-nav-item">
+      <i class="fas fa-list"></i>
+      <span>Transactions</span>
+    </a>
+    <a href="/imported-files" class="bottom-nav-item">
+      <i class="fas fa-file-pdf"></i>
+      <span>Imports</span>
+    </a>
+    <a href="/settings" class="bottom-nav-item">
+      <i class="fas fa-cog"></i>
+      <span>Paramètres</span>
+    </a>
+  </div>
+</nav>
+
+{% include "layout/_scripts.html" %}
+</body>
+</html>

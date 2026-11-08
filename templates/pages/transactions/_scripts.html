@@ -1,0 +1,210 @@
+{#
+  Page scripts. The second <script> is a single IIFE: the table code below and
+  the included _scripts_modals / _scripts_carousel share the same closure
+  (ALL_ROWS, share helpers, …), so keep the include order — later code uses
+  functions and variables declared earlier.
+#}
+<script>
+/* ── Global helpers (used by modal scripts) ─────────────────────────── */
+function showTransactionToast(msg, isError) {
+  var t    = document.getElementById('transaction-toast');
+  var icon = document.getElementById('transaction-toast-icon');
+  t.style.background = isError ? '#dc2626' : '#16a34a';
+  icon.className = 'fas ' + (isError ? 'fa-circle-xmark' : 'fa-check-circle');
+  document.getElementById('transaction-toast-msg').textContent = msg;
+  t.style.display = 'flex';
+  setTimeout(function() { t.style.display = 'none'; }, 3500);
+}
+
+function rebuildRows() {
+  ALL_ROWS = Array.from(document.querySelectorAll('#transactions-tbody tr[data-date]'));
+  buildYears();
+  applyFilters();
+}
+
+/* Refresh PENDING array then optionally re-render open carousel */
+async function syncPendingAfterSave() {
+  try {
+    var r = await fetch('/transactions/pending-json');
+    PENDING = await r.json();
+    if (document.getElementById('carousel-overlay').style.display === 'flex') {
+      if (PENDING.length === 0) {
+        document.getElementById('carousel-overlay').style.display = 'none';
+        showTransactionToast('Toutes les transactions sont complètes !');
+      } else {
+        cIdx = Math.min(cIdx, PENDING.length - 1);
+        loadCard(cIdx, 0);
+      }
+    }
+  } catch(e) {}
+}
+
+/* Trigger HTMX refresh on tbody and pending badge */
+function refreshTransactionTable()     { htmx.trigger(document.getElementById('transactions-tbody'), 'refresh'); }
+function refreshPendingBadge() { htmx.trigger(document.getElementById('btn-open-carousel'), 'refresh'); }
+</script>
+
+<script>
+(function () {
+/* ── Row data ─────────────────────────────────────────────────────────── */
+var ALL_ROWS = Array.from(document.querySelectorAll('#transactions-tbody tr[data-date]'));
+
+/* ── Filter state ─────────────────────────────────────────────────────── */
+var activeYear   = '';
+var activeSearch = (document.getElementById('search-input').value || '').toLowerCase();
+var activeCatId  = document.getElementById('cat-filter').value;
+
+/* ── Year buttons ─────────────────────────────────────────────────────── */
+function buildYears() {
+  var years = new Set();
+  ALL_ROWS.forEach(function(r) {
+    var d = r.getAttribute('data-date') || '';
+    if (d) years.add(d.slice(0, 4));
+  });
+  var sorted = Array.from(years).sort().reverse();
+  var container = document.getElementById('year-btns');
+  container.querySelectorAll('.year-btn[data-year]').forEach(function(b) {
+    if (b.dataset.year) b.remove();
+  });
+  sorted.forEach(function(y) {
+    var btn = document.createElement('button');
+    btn.className = 'year-btn btn-secondary filter-ctrl';
+    btn.dataset.year = y;
+    btn.textContent = y;
+    if (activeYear === y) btn.classList.add('active-year');
+    container.appendChild(btn);
+  });
+}
+window.buildYears = buildYears;
+buildYears();
+
+document.getElementById('year-btns').addEventListener('click', function(e) {
+  var btn = e.target.closest('.year-btn');
+  if (!btn) return;
+  document.querySelectorAll('.year-btn').forEach(function(b) { b.classList.remove('active-year'); });
+  btn.classList.add('active-year');
+  activeYear = btn.dataset.year;
+  applyFilters();
+});
+
+var searchTimer;
+document.getElementById('search-input').addEventListener('input', function() {
+  clearTimeout(searchTimer);
+  var val = this.value;
+  searchTimer = setTimeout(function() { activeSearch = val.toLowerCase(); applyFilters(); }, 150);
+});
+
+document.getElementById('cat-filter').addEventListener('change', function() {
+  activeCatId = this.value;
+  applyFilters();
+});
+
+document.getElementById('btn-reset-filters').addEventListener('click', function() {
+  activeYear = ''; activeSearch = ''; activeCatId = '';
+  document.getElementById('search-input').value = '';
+  document.getElementById('cat-filter').value = '';
+  document.querySelectorAll('.year-btn').forEach(function(b) { b.classList.remove('active-year'); });
+  document.querySelector('.year-btn[data-year=""]').classList.add('active-year');
+  applyFilters();
+});
+
+function applyFilters() {
+  ALL_ROWS.forEach(function(row) {
+    var date    = row.getAttribute('data-date') || '';
+    var op      = (row.getAttribute('data-op') || '').toLowerCase();
+    var catId   = row.getAttribute('data-cat') || '';
+    var yearOk  = !activeYear  || date.startsWith(activeYear);
+    var searchOk = !activeSearch || op.includes(activeSearch);
+    var catOk   = !activeCatId || catId === activeCatId;
+    row.style.display = (yearOk && searchOk && catOk) ? '' : 'none';
+  });
+}
+window.applyFilters = applyFilters;
+
+var styleTag = document.createElement('style');
+styleTag.textContent = '.year-btn.active-year{background-color:#4f46e5!important;color:white!important;}';
+document.head.appendChild(styleTag);
+
+/* ── Rebuild rows after any HTMX swap ────────────────────────────────── */
+document.addEventListener('htmx:afterSettle', function() {
+  ALL_ROWS = Array.from(document.querySelectorAll('#transactions-tbody tr[data-date]'));
+  buildYears();
+  applyFilters();
+});
+
+
+{% include "pages/transactions/_scripts_modals.html" %}
+
+
+
+/* ── Button delegation ────────────────────────────────────────────────── */
+document.getElementById('transactions-tbody').addEventListener('click', function(e) {
+  var btn = e.target.closest('.btn-edit-transaction');
+  if (btn) { openEdit(btn); return; }
+  btn = e.target.closest('.btn-delete-transaction');
+  if (btn) { openDelete(btn); }
+});
+
+/* ── CSV export ───────────────────────────────────────────────────────── */
+document.getElementById('btn-export-csv').addEventListener('click', function() {
+  var rows = ALL_ROWS.filter(function(r) { return r.style.display !== 'none'; });
+  var lines = [['Date','Opération','Catégorie','Propriétaire','Participants','Note','Montant'].join(',')];
+  rows.forEach(function(r) {
+    var cells = r.querySelectorAll('td');
+    var line = Array.from(cells).slice(1, 8).map(function(td) {
+      return '"' + td.textContent.trim().replace(/"/g, '""') + '"';
+    });
+    lines.push(line.join(','));
+  });
+  var blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href = url; a.download = 'transactions.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+{% include "pages/transactions/_scripts_carousel.html" %}
+
+/* ── Table height ─────────────────────────────────────────────────────── */
+(function fitTableHeight() {
+  var wrapper = document.getElementById('table-scroll-wrapper');
+  if (!wrapper) return;
+  function fit() {
+    var top = wrapper.getBoundingClientRect().top;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var bottomPad = window.innerWidth < 1024 ? 4 * rem + 8 : rem;
+    wrapper.style.height = Math.max(200, window.innerHeight - top - bottomPad) + 'px';
+  }
+  fit();
+  window.addEventListener('resize', fit);
+  document.addEventListener('htmx:afterSettle', fit);
+})();
+})();
+</script>
+
+<script>
+var PENDING = {{ pending_json | safe }};
+var cIdx    = 0;
+
+var _transactionSort = { col: null, dir: 0 };
+function transactionSort(col, el) {
+  var tbody = document.getElementById('transactions-tbody');
+  var rows  = Array.from(tbody.querySelectorAll('tr[data-date]'));
+  _transactionSort.dir = (_transactionSort.col === col && _transactionSort.dir === 1) ? -1 : 1;
+  _transactionSort.col = col;
+  document.querySelectorAll('#transactions-thead .sort-icon').forEach(function(i) {
+    i.className = 'fas fa-sort text-gray-400 text-xs sort-icon';
+  });
+  var icon = el.querySelector('.sort-icon');
+  if (icon) icon.className = 'fas ' + (_transactionSort.dir === 1 ? 'fa-sort-up' : 'fa-sort-down') + ' text-indigo-500 text-xs sort-icon';
+  rows.sort(function(a, b) {
+    var va, vb, d = _transactionSort.dir;
+    if (col === 'date')     { va = a.dataset.date || ''; vb = b.dataset.date || ''; return d * va.localeCompare(vb); }
+    if (col === 'category') { va = a.querySelectorAll('td')[3].textContent.trim(); vb = b.querySelectorAll('td')[3].textContent.trim(); return d * va.localeCompare(vb, 'fr'); }
+    if (col === 'owner')    { va = a.querySelectorAll('td')[4].textContent.trim(); vb = b.querySelectorAll('td')[4].textContent.trim(); return d * va.localeCompare(vb, 'fr'); }
+    if (col === 'amount')   { va = parseFloat(a.dataset.amount) || 0; vb = parseFloat(b.dataset.amount) || 0; return d * (va - vb); }
+    return 0;
+  });
+  rows.forEach(function(r) { tbody.appendChild(r); });
+}
+</script>

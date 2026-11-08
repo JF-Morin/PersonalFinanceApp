@@ -78,15 +78,15 @@ fn validate_balance(
     start_bal: f64,
     end_bal: f64,
 ) -> Result<()> {
-    let tx_sum: f64 = transactions.iter().map(|t| t.amount).sum();
+    let transaction_sum: f64 = transactions.iter().map(|t| t.amount).sum();
     let expected = end_bal - start_bal;
-    let error = (tx_sum - expected).abs();
+    let error = (transaction_sum - expected).abs();
 
     tracing::info!(
         bank        = %bank,
         start_bal   = %start_bal,
         end_bal     = %end_bal,
-        tx_sum      = %tx_sum,
+        transaction_sum      = %transaction_sum,
         expected    = %expected,
         error       = %error,
         "Balance validation"
@@ -99,7 +99,7 @@ fn validate_balance(
              • Variation de solde attendue (solde final − solde initial) : {:.2} €\n\
              • Écart : {:.2} €\n\n\
              Le fichier n'a pas été sauvegardé. Vérifiez que le relevé est complet et non tronqué.",
-            tx_sum,
+            transaction_sum,
             expected,
             error
         );

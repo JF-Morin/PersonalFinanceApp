@@ -1,0 +1,10 @@
+{% if category_labels %}
+<div class="max-w-md mx-auto">
+  <canvas id="categoryChart"></canvas>
+</div>
+{% else %}
+<p class="text-center text-gray-400 py-8 text-sm">Aucune donnée. Importez des relevés pour voir les statistiques.</p>
+{% endif %}
+<script type="application/json" id="chart-data-json">
+{"labels": {{ category_labels | json_encode() | safe }}, "totals": {{ category_totals | json_encode() | safe }}}
+</script>

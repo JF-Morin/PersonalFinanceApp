@@ -1,0 +1,279 @@
+{#
+  Single IIFE: all import-modal code shares its closure (modal, queue,
+  element refs, …). The state/element refs must stay above the code that
+  uses them at load time.
+#}
+<script>
+(function () {
+var modal   = document.getElementById('import-modal');
+var btnOpen = document.getElementById('btn-import');
+var btnClose = document.getElementById('im-close');
+var anyImported = false;
+
+function openModal()  { modal.style.display = 'flex'; }
+function closeModal() {
+  modal.style.display = 'none';
+  if (anyImported) window.location.reload();
+}
+
+btnOpen.addEventListener('click', openModal);
+btnClose.addEventListener('click', closeModal);
+modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+
+var queue  = [];
+var nextId = 0;
+var dropTarget    = document.getElementById('im-drop-target');
+var fileInput     = document.getElementById('im-file-input');
+var queueCard     = document.getElementById('im-file-queue');
+var fileList      = document.getElementById('im-file-list');
+var fileCount     = document.getElementById('im-file-count');
+var btnAnalyzeAll = document.getElementById('im-btn-analyze-all');
+var btnDeleteAll  = document.getElementById('im-btn-delete-all');
+
+dropTarget.addEventListener('click', function() { fileInput.click(); });
+dropTarget.addEventListener('dragover', function(e) {
+  e.preventDefault();
+  dropTarget.style.borderColor = '#4f46e5';
+  dropTarget.style.backgroundColor = 'rgba(79,70,229,0.05)';
+});
+dropTarget.addEventListener('dragleave', function() {
+  dropTarget.style.borderColor = '';
+  dropTarget.style.backgroundColor = '';
+});
+dropTarget.addEventListener('drop', function(e) {
+  e.preventDefault();
+  dropTarget.style.borderColor = '';
+  dropTarget.style.backgroundColor = '';
+  addFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', function() { addFiles(fileInput.files); fileInput.value = ''; });
+btnAnalyzeAll.addEventListener('click', analyzeAll);
+btnDeleteAll.addEventListener('click', deleteAll);
+
+function addFiles(files) {
+  Array.from(files).forEach(function(f) {
+    if (!f.name.toLowerCase().endsWith('.pdf')) return;
+    var item = { id: nextId++, file: f, status: 'pending', el: null };
+    item.el = buildRow(item);
+    queue.push(item);
+    fileList.appendChild(item.el);
+  });
+  refresh();
+}
+
+function removeItem(id) {
+  var idx = queue.findIndex(function(i) { return i.id === id; });
+  if (idx === -1) return;
+  queue[idx].el.remove();
+  queue.splice(idx, 1);
+  refresh();
+}
+
+function deleteAll() {
+  queue.filter(function(i) { return i.status !== 'imported'; })
+       .forEach(function(i) { i.el.remove(); });
+  queue = queue.filter(function(i) { return i.status === 'imported'; });
+  refresh();
+}
+
+function refresh() {
+  queueCard.style.display = queue.length ? '' : 'none';
+  fileCount.textContent = queue.length + ' fichier(s)';
+  var hasPending = queue.some(function(i) { return i.status === 'pending' || i.status === 'error'; });
+  btnAnalyzeAll.disabled = !hasPending;
+  btnAnalyzeAll.style.opacity = hasPending ? '1' : '0.4';
+  btnAnalyzeAll.style.cursor  = hasPending ? 'pointer' : 'not-allowed';
+}
+
+function buildRow(item) {
+  var kb  = Math.round(item.file.size / 1024);
+  var row = document.createElement('div');
+  row.className = 'rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700';
+  row.innerHTML =
+    '<div class="flex items-center gap-3 p-3">' +
+      '<div class="item-status-icon w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style="background:#f3f4f6">' +
+        '<i class="fas fa-file-pdf text-sm" style="color:#9ca3af"></i>' +
+      '</div>' +
+      '<div class="flex-1 min-w-0">' +
+        '<p class="text-sm font-medium truncate text-gray-900 dark:text-white">' + esc(item.file.name) + '</p>' +
+        '<p class="item-status-text text-xs mt-0.5 text-gray-500 dark:text-gray-300">' + kb + ' Ko — En attente</p>' +
+      '</div>' +
+      '<div class="flex items-center gap-1">' +
+        '<button class="btn-analyze w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-gray-400" title="Analyser et importer">' +
+          '<i class="fas fa-magnifying-glass text-xs"></i>' +
+        '</button>' +
+        '<button class="btn-del w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400" title="Supprimer">' +
+          '<i class="fas fa-trash-can text-xs"></i>' +
+        '</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="item-detail border-t border-gray-200 dark:border-slate-700 px-4 py-3" style="display:none"></div>';
+
+  var btnA = row.querySelector('.btn-analyze');
+  btnA.addEventListener('click', function() { analyzeOne(item); });
+  btnA.addEventListener('mouseenter', function() { btnA.style.color = '#2563eb'; btnA.style.background = 'rgba(37,99,235,0.08)'; });
+  btnA.addEventListener('mouseleave', function() { btnA.style.color = ''; btnA.style.background = ''; });
+
+  var btnD = row.querySelector('.btn-del');
+  btnD.addEventListener('click', function() { removeItem(item.id); });
+  btnD.addEventListener('mouseenter', function() { btnD.style.color = '#dc2626'; btnD.style.background = 'rgba(239,68,68,0.12)'; });
+  btnD.addEventListener('mouseleave', function() { btnD.style.color = ''; btnD.style.background = ''; });
+
+  return row;
+}
+
+var STATUS = {
+  pending:   { bg: '#f3f4f6', ic: '#9ca3af', cls: 'fas fa-file-pdf',          text: function(i) { return Math.round(i.file.size / 1024) + ' Ko — En attente'; } },
+  analyzing: { bg: '#dbeafe', ic: '#3b82f6', cls: 'fas fa-spinner fa-spin',   text: function()  { return 'Analyse en cours…'; } },
+  reparsing: { bg: '#e0e7ff', ic: '#6366f1', cls: 'fas fa-spinner fa-spin',   text: function()  { return 'Recherche des transactions manquantes…'; } },
+  importing: { bg: '#e0e7ff', ic: '#6366f1', cls: 'fas fa-spinner fa-spin',   text: function()  { return 'Importation en cours…'; } },
+  imported:  { bg: '#d1fae5', ic: '#059669', cls: 'fas fa-check-double',      text: function(i) { return i._info || 'Importé'; } },
+  duplicate: { bg: '#fef3c7', ic: '#f59e0b', cls: 'fas fa-clock-rotate-left', text: function()  { return 'Déjà importé — réanalyse disponible'; } },
+  error:     { bg: '#fee2e2', ic: '#ef4444', cls: 'fas fa-xmark',             text: function()  { return 'Importation échouée — non sauvegardé'; } },
+};
+
+function setStatus(item, status, detailHtml) {
+  item.status = status;
+  var cfg = STATUS[status];
+  item.el.querySelector('.item-status-icon').style.background = cfg.bg;
+  item.el.querySelector('.item-status-icon').innerHTML =
+    '<i class="' + cfg.cls + ' text-sm" style="color:' + cfg.ic + '"></i>';
+  item.el.querySelector('.item-status-text').textContent = cfg.text(item);
+  var btnA = item.el.querySelector('.btn-analyze');
+  var btnD = item.el.querySelector('.btn-del');
+  btnA.style.display = (status === 'pending' || status === 'error') ? '' : 'none';
+  btnD.style.display = (status === 'importing' || status === 'imported' || status === 'reparsing') ? 'none' : '';
+  var detail = item.el.querySelector('.item-detail');
+  if (detailHtml) { detail.innerHTML = detailHtml; detail.style.display = ''; }
+  else { detail.style.display = 'none'; detail.innerHTML = ''; }
+  refresh();
+}
+
+async function analyzeOne(item) {
+  if (item.status !== 'pending' && item.status !== 'error') return;
+  setStatus(item, 'analyzing');
+  var fd = new FormData();
+  fd.append('file', item.file);
+  var data;
+  try {
+    var r = await fetch('/upload/analyze', { method: 'POST', body: fd });
+    data  = await r.json();
+  } catch(e) {
+    setStatus(item, 'error', errHtml(e.message));
+    return;
+  }
+
+  if (!data.ok) {
+    if (data.duplicate) {
+      setStatus(item, 'duplicate', dupHtml(data.imported_at));
+      var detail = item.el.querySelector('.item-detail');
+      var btnYes = detail.querySelector('.btn-dup-reparse');
+      var btnNo  = detail.querySelector('.btn-dup-skip');
+      if (btnYes) btnYes.addEventListener('click', function() { doReparse(item, data.existing_file_id); });
+      if (btnNo)  btnNo.addEventListener('click',  function() { removeItem(item.id); });
+    } else {
+      setStatus(item, 'error', errHtml(data.error || 'Fichier non reconnu par aucun parseur disponible.'));
+    }
+    return;
+  }
+
+  setStatus(item, 'importing');
+  var params = new URLSearchParams({
+    transactions_json: data.transactions_json,
+    bank_id:           data.bank_id,
+    filename:          data.filename,
+    source_file:       data.source_file,
+    content_hash:      data.content_hash,
+  });
+  try {
+    var importRes  = await fetch('/upload/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+    var importData = await importRes.json();
+    if (importData.ok) {
+      anyImported = true;
+      removeItem(item.id);
+      addSummaryEntry(data, item.file.name, false);
+    } else {
+      setStatus(item, 'error', errHtml(importData.error || 'Erreur inconnue lors de la confirmation.'));
+    }
+  } catch(e) {
+    setStatus(item, 'error', errHtml(e.message));
+  }
+}
+
+async function doReparse(item, fileId) {
+  setStatus(item, 'reparsing', null);
+  try {
+    var r    = await fetch('/imported-files/' + fileId + '/reparse', { method: 'POST' });
+    var data = await r.json();
+    if (data.ok) {
+      anyImported = true;
+      item._info = data.added > 0
+        ? data.added + ' transaction(s) ajoutée(s), ' + data.skipped + ' déjà présente(s)'
+        : 'Aucune transaction manquante — déjà à jour';
+      setStatus(item, 'imported', null);
+      addSummaryEntry({ bank_name: '', transaction_count: data.added, broken_count: 0 }, item.file.name, true);
+    } else {
+      setStatus(item, 'error', errHtml(data.error || 'Erreur de réanalyse'));
+    }
+  } catch(e) {
+    setStatus(item, 'error', errHtml(e.message));
+  }
+}
+
+function analyzeAll() {
+  var pending = queue.filter(function(i) { return i.status === 'pending' || i.status === 'error'; });
+  return Promise.all(pending.map(function(i) { return analyzeOne(i); }));
+}
+
+function errHtml(msg) {
+  var lines = String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  return '<div style="background:#fee2e2;border-left:4px solid #dc2626;border-radius:8px;padding:0.75rem 1rem;margin-top:4px">' +
+           '<p style="font-weight:700;color:#991b1b;margin:0 0 0.35rem"><i class="fas fa-circle-xmark" style="margin-right:0.4rem"></i>Erreur — importation annulée</p>' +
+           '<p style="font-size:0.875rem;color:#7f1d1d;margin:0 0 0.35rem;line-height:1.55">' + lines + '</p>' +
+           '<p style="font-size:0.8rem;color:#b91c1c;margin:0"><i class="fas fa-shield-halved" style="margin-right:0.3rem"></i>Le fichier n\'a pas été sauvegardé (ni dans la base de données, ni sur le disque).</p>' +
+         '</div>';
+}
+
+function dupHtml(importedAt) {
+  return '<div style="background:#fef9c3;border-left:4px solid #f59e0b;border-radius:8px;padding:0.75rem 1rem">' +
+           '<p style="font-weight:700;color:#92400e;margin:0 0 0.35rem"><i class="fas fa-clock-rotate-left" style="margin-right:0.4rem"></i>Fichier déjà importé</p>' +
+           '<p style="font-size:0.875rem;color:#78350f;margin:0 0 0.75rem">Ce relevé a déjà été importé le <strong>' + esc(importedAt) + '</strong>.<br>Voulez-vous rechercher les transactions manquantes ou supprimées par erreur ?</p>' +
+           '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">' +
+             '<button class="btn-dup-reparse btn-primary" style="font-size:0.8rem;padding:0.35rem 0.85rem"><i class="fas fa-rotate" style="margin-right:0.3rem"></i>Oui — rechercher les transactions manquantes</button>' +
+             '<button class="btn-dup-skip btn-secondary" style="font-size:0.8rem;padding:0.35rem 0.85rem">Non, ignorer</button>' +
+           '</div>' +
+         '</div>';
+}
+
+function addSummaryEntry(data, originalName, isReparse) {
+  var summary = document.getElementById('im-import-summary');
+  var list    = document.getElementById('im-summary-list');
+  var label;
+  if (isReparse) {
+    label = data.transaction_count > 0
+      ? '<span style="color:#16a34a;font-weight:600">' + data.transaction_count + ' transaction(s) récupérée(s)</span>'
+      : '<span style="color:#6b7280">Aucune transaction manquante</span>';
+  } else {
+    var broken = data.broken_count > 0
+      ? ' <span style="color:#d97706">(' + data.broken_count + ' incomplète(s))</span>' : '';
+    label = '<span style="color:#16a34a;font-weight:600">' + data.transaction_count + ' transaction(s) importée(s)</span>' + broken;
+  }
+  var bankLabel = (!isReparse && data.bank_name) ? esc(data.bank_name) + ' — ' : '';
+  var entry = document.createElement('div');
+  entry.className = 'flex items-start gap-2 text-sm';
+  entry.innerHTML =
+    '<i class="fas fa-file-pdf text-red-400 mt-0.5 flex-shrink-0"></i>' +
+    '<span class="text-gray-700 dark:text-gray-300">' + esc(originalName) + ' — ' + bankLabel + label + '</span>';
+  list.appendChild(entry);
+  summary.style.display = '';
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+})();
+</script>

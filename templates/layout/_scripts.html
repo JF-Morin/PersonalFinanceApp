@@ -1,0 +1,51 @@
+<script>
+function setActiveNav() {
+  var path = window.location.pathname;
+  document.querySelectorAll('a.nav-link, .bottom-nav-item').forEach(function(link) {
+    var href = link.getAttribute('href');
+    if (!href) return;
+    var active = href === '/' ? path === '/' : path.startsWith(href);
+    link.classList.toggle('active', active);
+  });
+}
+setActiveNav();
+document.addEventListener('htmx:afterSettle', setActiveNav);
+</script>
+
+<script>
+(function() {
+  var sidebar  = document.getElementById('sidebar');
+  var overlay  = document.getElementById('sidebar-overlay');
+  var btnOpen  = document.getElementById('btn-sidebar-open');
+  var btnClose = document.getElementById('btn-sidebar-close');
+
+  function openSidebar() {
+    sidebar.classList.add('sidebar-open');
+    overlay.classList.add('visible');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSidebar() {
+    sidebar.classList.remove('sidebar-open');
+    overlay.classList.remove('visible');
+    document.body.style.overflow = '';
+  }
+
+  if (btnOpen)  btnOpen.addEventListener('click', openSidebar);
+  if (btnClose) btnClose.addEventListener('click', closeSidebar);
+  if (overlay)  overlay.addEventListener('click', closeSidebar);
+
+  document.querySelectorAll('#sidebar a.nav-link').forEach(function(a) {
+    a.addEventListener('click', function() {
+      if (window.innerWidth < 1024) closeSidebar();
+    });
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeSidebar();
+  });
+})();
+</script>
+
+<script>
+var CURRENT_USER_ID = {% if current_user %}{{ current_user.id }}{% else %}null{% endif %};
+</script>

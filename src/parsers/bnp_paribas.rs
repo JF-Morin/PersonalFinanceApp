@@ -32,7 +32,7 @@ impl BankParser for BnpParibasParser {
         let skip_re = Regex::new(
             r"(?i)(solde\s+cr[eé]diteur|solde\s+d[eé]biteur|total\s+des\s+op[eé]rations)",
         )?;
-        let tx_start_re = Regex::new(r"^(\d{2})\.(\d{2})\s")?;
+        let transaction_start_re = Regex::new(r"^(\d{2})\.(\d{2})\s")?;
 
         let mut transactions: Vec<ParsedTransaction> = Vec::new();
         let mut pending: Option<(String, String, f64, Vec<String>, Option<String>)> = None;
@@ -61,7 +61,7 @@ impl BankParser for BnpParibasParser {
                     let amount = if is_credit_keyword(&description) { abs_amount } else { -abs_amount };
                     pending = Some((date, valeur, amount, vec![description], None));
                 }
-            } else if let Some(sc) = tx_start_re.captures(line) {
+            } else if let Some(sc) = transaction_start_re.captures(line) {
                 flush(&mut pending, &mut transactions);
                 let op_month: u32 = sc[2].parse().unwrap_or(0);
                 let year = infer_year(op_month, start_month, end_month, start_year, end_year);
@@ -401,16 +401,16 @@ TOTAL DES OPERATIONS 1 416,07 173,26
 SOLDE CREDITEUR AU 26.01.2026 2 687,84";
 
         let p = BnpParibasParser;
-        let txs = p.parse(SAMPLE).expect("text fallback parse");
-        assert_eq!(txs.len(), 8);
+        let transactions = p.parse(SAMPLE).expect("text fallback parse");
+        assert_eq!(transactions.len(), 8);
 
-        assert!((txs[0].amount - 43.38).abs() < 0.01, "REMBOURST → credit");
-        assert!((txs[1].amount + 43.38).abs() < 0.01, "FACTURE → debit");
-        assert!((txs[2].amount - 129.88).abs() < 0.01, "second REMBOURST → credit");
-        assert_eq!(txs[5].date, "2026-01-05");
-        assert_eq!(txs[6].date, "2026-01-16");
-        assert!((txs[6].amount + 80.00).abs() < 0.01);
-        assert!((txs[7].amount + 6.02).abs() < 0.01);
+        assert!((transactions[0].amount - 43.38).abs() < 0.01, "REMBOURST → credit");
+        assert!((transactions[1].amount + 43.38).abs() < 0.01, "FACTURE → debit");
+        assert!((transactions[2].amount - 129.88).abs() < 0.01, "second REMBOURST → credit");
+        assert_eq!(transactions[5].date, "2026-01-05");
+        assert_eq!(transactions[6].date, "2026-01-16");
+        assert!((transactions[6].amount + 80.00).abs() < 0.01);
+        assert!((transactions[7].amount + 6.02).abs() < 0.01);
     }
 
     /// Print raw text extracted by pdf_extract.

@@ -1,0 +1,91 @@
+{% extends "layout/base.html" %}
+{% block title %}Accueil — Finance Perso{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Accueil</h1>
+</div>
+
+<!-- Stats row (auto-refreshes via SSE) -->
+<div id="stats-row-container"
+     hx-get="/home/stats-row"
+     hx-trigger="sse:transactions, sse:imports, refresh"
+     hx-swap="innerHTML">
+  {% include "pages/home/_stats_row.html" %}
+</div>
+
+<!-- Balances -->
+<div class="card mb-6">
+  <h2 class="text-base font-semibold mb-3 flex items-center gap-2">
+    <i class="fas fa-scale-balanced text-primary-600"></i> Soldes entre utilisateurs
+    <span class="text-xs text-gray-400 font-normal">(transactions complètes)</span>
+    <button class="ml-auto text-gray-400 hover:text-primary-600 bg-transparent border-none cursor-pointer p-1 rounded-lg transition-colors"
+            title="Actualiser"
+            onclick="var i=this.querySelector('i');i.classList.add('fa-spin');htmx.trigger(document.getElementById('balances-content'),'refresh');setTimeout(function(){i.classList.remove('fa-spin')},600)">
+      <i class="fas fa-rotate-right text-sm"></i>
+    </button>
+  </h2>
+  <div id="balances-content"
+       hx-get="/home/balances"
+       hx-trigger="load, sse:transactions, sse:imports, refresh"
+       hx-swap="innerHTML">
+    {% include "pages/home/_balances.html" %}
+  </div>
+</div>
+
+<!-- Spending chart -->
+<div class="card">
+  <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+    <i class="fas fa-chart-pie text-primary-600 mr-1"></i>Dépenses par catégorie
+    <button class="ml-auto text-gray-400 hover:text-primary-600 bg-transparent border-none cursor-pointer p-1 rounded-lg transition-colors"
+            title="Actualiser"
+            onclick="var i=this.querySelector('i');i.classList.add('fa-spin');htmx.trigger(document.getElementById('chart-container'),'refresh');setTimeout(function(){i.classList.remove('fa-spin')},600)">
+      <i class="fas fa-rotate-right text-sm"></i>
+    </button>
+  </h2>
+  <div id="chart-container"
+       hx-get="/home/chart-part"
+       hx-trigger="sse:transactions, sse:imports, refresh"
+       hx-swap="innerHTML">
+    {% include "pages/home/_chart_part.html" %}
+  </div>
+</div>
+
+<script>
+var CHART_COLORS = ['#4f46e5','#7c3aed','#db2777','#ea580c','#ca8a04','#16a34a','#0891b2','#6366f1','#ec4899','#f59e0b'];
+
+function initChartFromJson() {
+  var jsonEl = document.getElementById('chart-data-json');
+  if (!jsonEl) return;
+  var data;
+  try { data = JSON.parse(jsonEl.textContent); } catch(e) { return; }
+  var container = document.getElementById('chart-container');
+  if (!data.labels || data.labels.length === 0) return;
+  var ctx = document.getElementById('categoryChart');
+  if (!ctx) return;
+  var stale = Chart.getChart(ctx);
+  if (stale) stale.destroy();
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels: data.labels, datasets: [{ data: data.totals, backgroundColor: CHART_COLORS }] },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+}
+
+initChartFromJson();
+
+document.addEventListener('htmx:afterSettle', function(e) {
+  if (e.detail.target && (e.detail.target.id === 'chart-container' || e.detail.target.closest && e.detail.target.closest('#chart-container'))) {
+    initChartFromJson();
+  }
+});
+
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden) {
+    htmx.trigger(document.getElementById('stats-row-container'), 'refresh');
+    htmx.trigger(document.getElementById('balances-content'), 'refresh');
+    htmx.trigger(document.getElementById('chart-container'), 'refresh');
+  }
+});
+</script>
+{% endblock %}

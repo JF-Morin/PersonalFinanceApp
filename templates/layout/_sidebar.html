@@ -1,0 +1,54 @@
+<aside id="sidebar"
+       class="w-72 flex-shrink-0 bg-white dark:bg-slate-800
+              border-r border-gray-200 dark:border-slate-700 flex flex-col"
+       style="box-shadow: 1px 0 4px rgba(0,0,0,0.06);">
+
+  <!-- Mobile close button -->
+  <button id="btn-sidebar-close" aria-label="Fermer le menu">
+    <i class="fas fa-xmark"></i>
+  </button>
+
+  <!-- Logo -->
+  <div class="px-5 py-5 border-b border-gray-200 dark:border-slate-700">
+    <a href="/" class="flex items-center gap-3 no-underline" style="text-decoration:none;">
+      <span class="w-9 h-9 rounded-xl bg-primary-600 flex items-center justify-center flex-shrink-0"
+            style="box-shadow: 0 1px 3px rgba(0,0,0,0.18);">
+        <i class="fas fa-wallet text-white text-sm"></i>
+      </span>
+      <span class="font-bold text-base text-primary-600 dark:text-primary-400">Finance Perso</span>
+    </a>
+  </div>
+
+  <!-- Current user chip -->
+  {% if current_user %}
+  <div class="px-4 py-3 border-b border-gray-200 dark:border-slate-700">
+    <div class="flex items-center gap-3 bg-primary-50 dark:bg-slate-700 rounded-xl px-3 py-2">
+      <span class="w-8 h-8 rounded-full bg-primary-600 text-white text-xs font-bold
+                   flex items-center justify-center flex-shrink-0 select-none">
+        {{ current_user.name | upper | truncate(length=1, end="") }}
+      </span>
+      <span class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
+        {{ current_user.name }}{% if current_user.last_name %} {{ current_user.last_name }}{% endif %}
+      </span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Navigation links -->
+  <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto"
+       hx-boost="true">
+    <a href="/"               class="nav-link"><i class="fas fa-home"></i> Accueil</a>
+    <a href="/transactions"   class="nav-link"><i class="fas fa-list"></i> Transactions</a>
+    <a href="/imported-files" class="nav-link"><i class="fas fa-file-pdf"></i> Imports</a>
+    <a href="/settings"       class="nav-link"><i class="fas fa-cog"></i> Paramètres</a>
+  </nav>
+
+  <!-- Logout -->
+  <div class="px-3 py-3 border-t border-gray-200 dark:border-slate-700">
+    <form action="/logout" method="POST">
+      <button type="submit" class="nav-link nav-link-danger">
+        <i class="fas fa-right-from-bracket"></i> Changer d'utilisateur
+      </button>
+    </form>
+  </div>
+</aside>

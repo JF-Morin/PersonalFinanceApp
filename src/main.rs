@@ -23,11 +23,19 @@ mod sse;
 use config::Config;
 use db::DbPool;
 
+/// Global application state — cloned cheaply per-request by Axum.
+///
+/// Every field is behind an `Arc` so cloning only increments a reference count.
+/// Axum injects this via `State(state): State<AppState>` in handler arguments.
 #[derive(Clone)]
 pub struct AppState {
+    /// SQLite connection pool — each `await` on a query borrows one connection.
     pub db: DbPool,
+    /// Static config (ports, paths, secrets) loaded once at startup.
     pub config: Arc<Config>,
+    /// Compiled Tera template engine — renders `.html` templates from `templates/`.
     pub tera: Arc<Tera>,
+    /// Broadcast channel used to push SSE events to all connected browsers.
     pub events: Arc<sse::EventBus>,
 }
 
@@ -69,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // ── Directories ────────────────────────────────────────────────────────────
+    // Ensure the SQLite database directory exists before sqlx tries to open the file.
     if let Some(parent) = std::path::Path::new(&config.database_url.replace("sqlite:", "")).parent() {
         tokio::fs::create_dir_all(parent).await.ok();
     }
@@ -77,10 +86,14 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Database ───────────────────────────────────────────────────────────────
     let db = db::create_pool(&config.database_url).await?;
+    // Embedded migrations (from `migrations/`) are run automatically at startup.
     db::run_migrations(&db).await?;
 
     // ── Templates ─────────────────────────────────────────────────────────────
+    // `Tera::new` compiles all templates from the glob at startup — a parse error here
+    // crashes the server immediately rather than at render time.
     let mut tera = Tera::new("templates/**/*.html")?;
+    // Custom filter: `{{ value | fixed2 }}` formats a float to exactly 2 decimal places.
     tera.register_filter("fixed2", |value: &tera::Value, _: &std::collections::HashMap<String, tera::Value>| {
         match value.as_f64() {
             Some(f) => Ok(tera::Value::String(format!("{:.2}", f))),
@@ -98,38 +111,42 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Router ─────────────────────────────────────────────────────────────────
     let app = Router::new()
-        // Auth
+        // ── Auth ──────────────────────────────────────────────────────────────
         .route("/login",  get(handlers::auth::get_login).post(handlers::auth::post_login))
         .route("/logout", post(handlers::auth::post_logout))
-        // Main pages
+        // ── Home page (balances, chart, stats) ────────────────────────────────
         .route("/",                        get(handlers::home::get_home))
         .route("/home/balances",           get(handlers::home::get_balances_partial))
-        .route("/home/chart-data",         get(handlers::home::get_chart_data))
-        .route("/home/stats",              get(handlers::home::get_stats))
+        .route("/home/chart-part",         get(handlers::home::get_chart_part))
+        .route("/home/stats-row",          get(handlers::home::get_stats_row))
+        // ── Settings ──────────────────────────────────────────────────────────
         .route("/settings",                get(handlers::settings::get_settings)
                                           .post(handlers::settings::post_settings))
         .route("/settings/users",          post(handlers::settings::post_new_user))
         .route("/settings/users/:id",      delete(handlers::settings::delete_user))
         .route("/settings/users/:id/edit", post(handlers::settings::post_edit_user))
-        .route("/settings/password",       post(handlers::settings::post_change_password))
-        // Transactions
-        .route("/transactions",            get(handlers::transactions::get_transactions))
-        .route("/transactions/:id/update", post(handlers::transactions::post_update_transaction))
+        // ── Transactions ──────────────────────────────────────────────────────
+        .route("/transactions",               get(handlers::transactions::get_transactions))
+        .route("/transactions/pending-json",  get(handlers::transactions::get_pending_json))
+        .route("/transactions/pending-badge", get(handlers::transactions::get_pending_badge))
+        .route("/transactions/:id/update",   post(handlers::transactions::post_update_transaction))
         .route("/transactions/:id/delete", post(handlers::transactions::post_delete_transaction))
         .route("/transactions/:id/shares", post(handlers::transactions::post_transaction_share))
         .route("/transactions/:id/shares/:user_id", delete(handlers::transactions::delete_transaction_share))
         .route("/transactions/manual",     post(handlers::transactions::post_manual_transaction))
-        // Imports
+        // ── Imports ───────────────────────────────────────────────────────────
         .route("/imported-files",          get(handlers::imports::get_imported_files))
         .route("/imported-files/:id/delete",  post(handlers::imports::post_delete_imported_file))
         .route("/imported-files/:id/reparse", post(handlers::imports::post_reparse_imported_file))
         .route("/upload/analyze",          post(handlers::imports::post_analyze))
         .route("/upload/confirm",          post(handlers::imports::post_confirm_import))
+        // ── Misc ──────────────────────────────────────────────────────────────
         .route("/404-not-found",           get(handlers::get_not_found))
+        // SSE endpoint — browsers hold this connection open for the lifetime of the tab.
         .route("/events",                  get(sse::get_events))
-        // Static files
+        // Static files served directly from the `static/` directory.
         .nest_service("/static", ServeDir::new("static"))
-        // 404 fallback for undefined routes
+        // Catch-all: redirect unknown routes to the 404 page.
         .fallback(handlers::handler_404)
         // HTTP request/response tracing — logs method, path, status, latency
         .layer(

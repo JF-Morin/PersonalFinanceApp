@@ -1,4 +1,10 @@
-use axum::{extract::State, response::{Html, IntoResponse, Json}};
+/// Home page handlers — balance summary, spending chart, and stats row.
+///
+/// The page uses HTMX SSE triggers to auto-refresh its three sections whenever
+/// the `transactions` or `imports` SSE events fire.  Each section has a dedicated
+/// partial endpoint (`/home/balances`, `/home/chart-part`, `/home/stats-row`) so
+/// HTMX can swap each one independently without reloading the full page.
+use axum::{extract::State, response::Html};
 use axum_extra::extract::CookieJar;
 use std::collections::HashMap;
 
@@ -9,6 +15,15 @@ fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
+/// Compute net balances between every pair of users, per currency.
+///
+/// Logic overview:
+///   For each complete transaction owned by user A:
+///     - A paid the full amount (expense = negative, income = positive).
+///     - Each other user B who has a share% owes A that share of the expense,
+///       or is owed by A that share of the income.
+///   The net for the pair (A, B) is: sum of A's portions for B  −  sum of B's portions for A.
+///   If the net is positive, A owes B; if negative, B owes A.
 async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
     // Query 1: all complete transactions — owner pays/receives the full amount.
     let owner_rows: Vec<(i64, i64, f64)> = sqlx::query_as(
@@ -78,6 +93,7 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
     let user_ids: Vec<i64> = all_users.iter().map(|u| u.id).collect();
     let mut result: Vec<UserPairBalance> = Vec::new();
 
+    // Special case: only one user — show totals against a placeholder "Autre personne".
     if user_ids.len() == 1 {
         let uid1 = user_ids[0];
         let uname1 = user_names.get(&uid1).cloned().unwrap_or_default();
@@ -118,11 +134,13 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
         return Ok(result);
     }
 
+    // Multi-user: iterate every unique pair (i, j) with i < j to avoid double-counting.
     for i in 0..user_ids.len() {
         for j in (i + 1)..user_ids.len() {
             let uid1 = user_ids[i];
             let uid2 = user_ids[j];
 
+            // Collect all currencies that appear in either user's transactions.
             let mut cids: std::collections::HashSet<i64> = std::collections::HashSet::new();
             for &(uid, cid) in total_debit.keys().chain(total_credit.keys()) {
                 if uid == uid1 || uid == uid2 { cids.insert(cid); }
@@ -131,12 +149,14 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
             for cid in cids {
                 let u1_td  = total_debit .get(&(uid1, cid)).copied().unwrap_or(0.0);
                 let u1_tc  = total_credit.get(&(uid1, cid)).copied().unwrap_or(0.0);
+                // u1_dfo = sum of (uid1 owns, uid2 is participant) expense portions
                 let u1_dfo = debit_for_other .get(&(uid1, uid2, cid)).copied().unwrap_or(0.0);
                 let u1_cfo = credit_for_other.get(&(uid1, uid2, cid)).copied().unwrap_or(0.0);
                 let u1_tfo = u1_dfo + u1_cfo;
 
                 let u2_td  = total_debit .get(&(uid2, cid)).copied().unwrap_or(0.0);
                 let u2_tc  = total_credit.get(&(uid2, cid)).copied().unwrap_or(0.0);
+                // u2_dfo = sum of (uid2 owns, uid1 is participant) expense portions
                 let u2_dfo = debit_for_other .get(&(uid2, uid1, cid)).copied().unwrap_or(0.0);
                 let u2_cfo = credit_for_other.get(&(uid2, uid1, cid)).copied().unwrap_or(0.0);
                 let u2_tfo = u2_dfo + u2_cfo;
@@ -145,6 +165,7 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
                     continue;
                 }
 
+                // net > 0 means uid1 owes uid2; net < 0 means uid2 owes uid1.
                 let net = u1_tfo - u2_tfo;
                 let (debtor, creditor, net_amount) = if net > 0.005 {
                     (user_names.get(&uid1).cloned().unwrap_or_default(),
@@ -181,6 +202,8 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
     Ok(result)
 }
 
+/// Compute the top-10 spending categories (by absolute amount) across all complete transactions.
+/// Returns parallel `(labels, totals)` vectors suitable for Chart.js.
 async fn compute_chart_data(db: &DbPool) -> AppResult<(Vec<String>, Vec<f64>)> {
     let by_category: Vec<(Option<String>, Option<f64>)> = sqlx::query_as(
         r#"
@@ -208,10 +231,12 @@ async fn compute_chart_data(db: &DbPool) -> AppResult<(Vec<String>, Vec<f64>)> {
     Ok((labels, totals))
 }
 
+/// GET / — full home page (initial render, includes pre-rendered partials for SSR).
 pub async fn get_home(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> AppResult<Html<String>> {
+    let user_id = super::get_user_id(&jar)?;
     let mut ctx = base_context(&jar, &state.db).await?;
 
     let pair_balances = compute_balances(&state.db).await?;
@@ -220,6 +245,7 @@ pub async fn get_home(
     let total_transactions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
         .fetch_one(&state.db)
         .await?;
+    // Exclude the synthetic "manual" file row that is created for manually-added transactions.
     let total_files: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM imported_files WHERE filename != 'manual'"
     )
@@ -228,8 +254,9 @@ pub async fn get_home(
     let pending_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM transactions t \
          JOIN transaction_status s ON t.status_id = s.id \
-         WHERE s.name IN ('pending', 'broken')"
+         WHERE s.name IN ('pending', 'broken') AND t.owner_id = ?"
     )
+    .bind(user_id)
     .fetch_one(&state.db)
     .await?;
 
@@ -240,10 +267,11 @@ pub async fn get_home(
     ctx.insert("category_labels", &category_labels);
     ctx.insert("category_totals", &category_totals);
 
-    let html = state.tera.render("home.html", &ctx)?;
+    let html = state.tera.render("pages/home/home.html", &ctx)?;
     Ok(Html(html))
 }
 
+/// GET /home/balances — partial for the balances card, refreshed by SSE.
 pub async fn get_balances_partial(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -252,24 +280,16 @@ pub async fn get_balances_partial(
     let pair_balances = compute_balances(&state.db).await?;
     let mut ctx = tera::Context::new();
     ctx.insert("pair_balances", &pair_balances);
-    let html = state.tera.render("home/_balances.html", &ctx)?;
+    let html = state.tera.render("pages/home/_balances.html", &ctx)?;
     Ok(Html(html))
 }
 
-pub async fn get_chart_data(
+/// GET /home/stats-row — partial for the three stat counters at the top of the home page.
+pub async fn get_stats_row(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> AppResult<impl IntoResponse> {
-    super::get_user_id(&jar)?;
-    let (labels, totals) = compute_chart_data(&state.db).await?;
-    Ok(Json(serde_json::json!({ "labels": labels, "totals": totals })))
-}
-
-pub async fn get_stats(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> AppResult<impl IntoResponse> {
-    super::get_user_id(&jar)?;
+) -> AppResult<Html<String>> {
+    let user_id = super::get_user_id(&jar)?;
     let total_transactions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
         .fetch_one(&state.db)
         .await?;
@@ -281,13 +301,29 @@ pub async fn get_stats(
     let pending_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM transactions t \
          JOIN transaction_status s ON t.status_id = s.id \
-         WHERE s.name IN ('pending', 'broken')"
+         WHERE s.name IN ('pending', 'broken') AND t.owner_id = ?"
     )
+    .bind(user_id)
     .fetch_one(&state.db)
     .await?;
-    Ok(Json(serde_json::json!({
-        "total_transactions": total_transactions,
-        "total_files": total_files,
-        "pending_count": pending_count,
-    })))
+    let mut ctx = tera::Context::new();
+    ctx.insert("total_transactions", &total_transactions);
+    ctx.insert("total_files", &total_files);
+    ctx.insert("pending_count", &pending_count);
+    let html = state.tera.render("pages/home/_stats_row.html", &ctx)?;
+    Ok(Html(html))
+}
+
+/// GET /home/chart-part — partial for the doughnut chart section, refreshed by SSE.
+pub async fn get_chart_part(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<Html<String>> {
+    super::get_user_id(&jar)?;
+    let (category_labels, category_totals) = compute_chart_data(&state.db).await?;
+    let mut ctx = tera::Context::new();
+    ctx.insert("category_labels", &category_labels);
+    ctx.insert("category_totals", &category_totals);
+    let html = state.tera.render("pages/home/_chart_part.html", &ctx)?;
+    Ok(Html(html))
 }

@@ -154,8 +154,8 @@
   }
 
   /* Enlarge table action buttons for touch */
-  .btn-edit-tx,
-  .btn-del-tx,
+  .btn-edit-transaction,
+  .btn-delete-transaction,
   .reparse-btn,
   .delete-btn {
     width: 2.75rem !important;
@@ -183,7 +183,7 @@
 
 /* ── Toast: float above bottom nav on mobile ───────────────── */
 @media (max-width: 1023px) {
-  #tx-toast,
+  #transaction-toast,
   #toast {
     bottom: calc(var(--bottomnav-h) + 0.75rem) !important;
     right: 1rem !important;
@@ -191,11 +191,7 @@
     text-align: center;
     justify-content: center;
   }
-  #sse-banner {
-    top: calc(var(--topbar-h) + 0.5rem) !important;
-    right: 0.75rem !important;
-    left: 0.75rem !important;
-  }
+
 }
 
 /* ── Modal → bottom sheet on mobile ────────────────────────── */
@@ -208,8 +204,7 @@
   #carousel-overlay,
   #delete-modal,
   #reparse-modal,
-  #settings-edit-modal,
-  .modal-overlay {
+  #settings-edit-modal {
     align-items: flex-end !important;
     padding: 0 !important;
   }
@@ -254,36 +249,6 @@
     min-height: 2.75rem;
   }
 }
-
-/* ── Table: horizontal scroll affordance ────────────────────── */
-.table-scroll-wrap {
-  overflow-x: auto;
-  overflow-y: visible;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-}
-
-@media (max-width: 767px) {
-  /* Fade hint on right edge to signal more content */
-  .table-scroll-fade {
-    position: relative;
-  }
-  .table-scroll-fade::after {
-    content: '';
-    position: absolute;
-    top: 0; right: 0; bottom: 0;
-    width: 2.5rem;
-    background: linear-gradient(to right, transparent, rgba(241,245,249,0.9));
-    pointer-events: none;
-    z-index: 5;
-  }
-  .dark .table-scroll-fade::after {
-    background: linear-gradient(to right, transparent, rgba(15,23,42,0.9));
-  }
-}
-
-/* ── Share pill ─────────────────────────────────────────────── */
-/* (definitions live in list.html <style> block; these are fallbacks) */
 
 /* ── Reduced motion ─────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {

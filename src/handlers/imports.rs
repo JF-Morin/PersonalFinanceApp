@@ -1,3 +1,19 @@
+/// Import handlers — PDF upload, analysis, confirmation, deletion, and reparse.
+///
+/// The import flow is two-step:
+///   1. POST /upload/analyze   — receive the PDF, extract text, run bank parsers, return
+///                               a JSON preview of parsed transactions to the browser.
+///   2. POST /upload/confirm   — browser sends back the JSON plus form fields; we write the
+///                               `imported_files` row and all `transactions` rows to the DB.
+///
+/// Two-step prevents "phantom" imports when the user cancels the preview modal.
+/// The file is NOT written to storage until the user confirms.
+///
+/// Duplicate detection uses a SHA-256 hash of the PDF bytes; the hash is stored in
+/// `imported_files.content_hash` and checked at both analyze and confirm time.
+///
+/// For PDFs that use Type3 fonts (which crash pdf_extract), we fall back to lopdf-based
+/// positioned text extraction where column X coordinates distinguish debits from credits.
 use axum::{
     extract::{Multipart, Path, Query, State},
     http::HeaderMap,
@@ -16,8 +32,9 @@ use crate::{
     parsers::{all_parsers, detect_and_parse, detect_and_parse_positioned, lopdf_text},
     AppState,
 };
-use super::base_context;
+use super::{base_context, is_htmx};
 
+/// Enriched file row joined with bank name and importer name for the imports table.
 #[derive(Debug, Serialize, sqlx::FromRow)]
 struct ImportedFileView {
     id: i64,
@@ -30,6 +47,8 @@ struct ImportedFileView {
     importer_id: i64,
 }
 
+/// GET /imported-files — render the imported files list page.
+/// The synthetic "manual" row is excluded from the table (it's an implementation detail).
 pub async fn get_imported_files(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -60,20 +79,24 @@ pub async fn get_imported_files(
     ctx.insert("files", &files);
     ctx.insert("current_user_id", &current_user_id);
     ctx.insert("banks", &banks);
-    let html = state.tera.render("imports/list.html", &ctx)?;
+    let html = state.tera.render("pages/imports/imports.html", &ctx)?;
     Ok(Html(html))
 }
 
-
+/// Form submitted by the import confirmation modal.
 #[derive(Deserialize)]
 pub struct ConfirmImportForm {
+    /// The parsed transactions JSON that was returned from the analyze step and echoed back.
     pub transactions_json: String,
     pub bank_id: i64,
     pub filename: String,
+    /// Relative path under STORAGE_PATH where the file was already written.
     pub source_file: String,
+    /// SHA-256 hex digest of the original PDF bytes (checked again server-side).
     pub content_hash: String,
 }
 
+/// POST /upload/confirm — persist the analyzed transactions to the DB.
 pub async fn post_confirm_import(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -148,26 +171,30 @@ async fn confirm_import_inner(
     .fetch_one(&state.db)
     .await?;
 
-    for tx in &transactions {
-        let status_id: i64 = if tx.parse_note.is_some() { 3 } else { 1 };
+    for transaction in &transactions {
+        // status_id: 1 = pending, 3 = broken (parse_note present).
+        let status_id: i64 = if transaction.parse_note.is_some() { 3 } else { 1 };
         sqlx::query(
             "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, owner_id, status_id, from_file_id, parse_note)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(&tx.date)
-        .bind(&tx.transaction_date)
-        .bind(&tx.operation)
-        .bind(tx.amount)
+        .bind(&transaction.date)
+        .bind(&transaction.transaction_date)
+        .bind(&transaction.operation)
+        .bind(transaction.amount)
         .bind(default_currency_id)
         .bind(user_id)
         .bind(status_id)
         .bind(file_id)
-        .bind(&tx.parse_note)
+        .bind(&transaction.parse_note)
         .execute(&state.db)
         .await?;
     }
 
-    state.events.send(crate::sse::AppEvent { kind: "imports", actor_id: user_id });
+    // Notify imports listeners (imports page) and transactions listeners (transactions page,
+    // home page) — this operation writes rows to both tables.
+    state.events.send(crate::sse::AppEvent { kind: "imports",      actor_id: user_id });
+    state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
     tracing::info!(
         file_id      = %file_id,
         filename     = %form.filename,
@@ -177,10 +204,11 @@ async fn confirm_import_inner(
         "Import confirmed and saved"
     );
 
-    Ok(Json(serde_json::json!({ "ok": true, "file_id": file_id, "tx_count": transactions.len() }))
+    Ok(Json(serde_json::json!({ "ok": true, "file_id": file_id, "transaction_count": transactions.len() }))
         .into_response())
 }
 
+/// POST /upload/analyze — receive a PDF, parse it, return a JSON preview (no DB writes).
 pub async fn post_analyze(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -202,6 +230,7 @@ async fn analyze_inner(
     let mut file_bytes: Option<bytes::Bytes> = None;
     let mut original_name = String::from("upload.pdf");
 
+    // Read the multipart stream until we find the "file" field.
     while let Some(field) = multipart.next_field().await.map_err(|e| AppError::Other(e.to_string()))? {
         if field.name() == Some("file") {
             original_name = field.file_name().unwrap_or("upload.pdf").to_string();
@@ -282,7 +311,7 @@ async fn analyze_inner(
     let relative_path = format!("Statements/{}/{}", bank_name, safe_name);
 
     let broken_count = transactions.iter().filter(|t| t.parse_note.is_some()).count();
-    let tx_count = transactions.len();
+    let transaction_count = transactions.len();
 
     let transactions_json = serde_json::to_string(&transactions)
         .map_err(|e| AppError::Other(e.to_string()))?;
@@ -290,7 +319,7 @@ async fn analyze_inner(
     tracing::info!(
         filename   = %safe_name,
         bank       = %bank_name,
-        tx_count   = %tx_count,
+        transaction_count   = %transaction_count,
         broken     = %broken_count,
         "Analysis complete"
     );
@@ -299,7 +328,7 @@ async fn analyze_inner(
         "ok": true,
         "bank_id": bank_id,
         "bank_name": bank_name,
-        "tx_count": tx_count,
+        "transaction_count": transaction_count,
         "broken_count": broken_count,
         "transactions_json": transactions_json,
         "filename": safe_name,
@@ -312,13 +341,14 @@ async fn analyze_inner(
 ///
 /// Tries pdf_extract first. If that panics (e.g. Type3 fonts, lopdf 0.34 issue),
 /// falls back to lopdf-based positioned text extraction and the positioned parser path.
+/// `catch_unwind` is used to convert a panic into a Result so the server keeps running.
 async fn safe_detect_and_parse(
     bytes: bytes::Bytes,
     filename: &str,
 ) -> AppResult<(i64, String, Vec<ParsedTransaction>)> {
     let bytes_clone = bytes.clone();
 
-    // Try pdf_extract inside catch_unwind so a panic becomes an Err
+    // Run pdf_extract in a blocking thread (it's CPU-bound) and catch any panics.
     let text_result = tokio::task::spawn_blocking(move || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             pdf_extract::extract_text_from_mem(&bytes_clone)
@@ -357,6 +387,7 @@ async fn safe_detect_and_parse(
             })
         }
         Ok(Err(pdf_err)) => {
+            // pdf_extract returned an error (not a panic) — try lopdf.
             tracing::warn!(
                 filename = %filename,
                 error    = %pdf_err,
@@ -365,12 +396,15 @@ async fn safe_detect_and_parse(
             lopdf_fallback(&bytes, filename)
         }
         Err(_panic_payload) => {
+            // pdf_extract panicked — try lopdf.
             tracing::warn!(filename = %filename, "pdf_extract panicked, trying lopdf fallback");
             lopdf_fallback(&bytes, filename)
         }
     }
 }
 
+/// lopdf-based extraction path: returns positioned text items (char, x, y per page)
+/// so parsers can determine debit/credit by X column position.
 fn lopdf_fallback(
     bytes: &bytes::Bytes,
     filename: &str,
@@ -388,19 +422,24 @@ fn lopdf_fallback(
 
 // ── Delete imported file ──────────────────────────────────────────────────────
 
+/// Query parameter: `?with_transactions=1` to also delete all linked transactions.
 #[derive(Deserialize)]
 pub struct DeleteFileParams {
     #[serde(default)]
     with_transactions: Option<String>,
 }
 
+/// POST /imported-files/:id/delete — delete a file and optionally its transactions.
+/// Returns an `HX-Trigger: showFileToast` header so the imports page can show a toast
+/// without a full reload.
 pub async fn post_delete_imported_file(
     State(state): State<AppState>,
     jar: CookieJar,
     Path(file_id): Path<i64>,
     Query(params): Query<DeleteFileParams>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    match delete_file_inner(state, jar, file_id, &params).await {
+    match delete_file_inner(state, jar, file_id, &params, is_htmx(&headers)).await {
         Ok(resp) => resp,
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
     }
@@ -411,6 +450,7 @@ async fn delete_file_inner(
     jar: CookieJar,
     file_id: i64,
     params: &DeleteFileParams,
+    htmx: bool,
 ) -> AppResult<axum::response::Response> {
     let user_id = super::get_user_id(&jar)?;
 
@@ -471,6 +511,10 @@ async fn delete_file_inner(
     }
 
     state.events.send(crate::sse::AppEvent { kind: "imports", actor_id: user_id });
+    // Also notify the transactions page when rows were actually deleted.
+    if transactions_deleted > 0 {
+        state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
+    }
     tracing::info!(
         file_id              = %file_id,
         filename             = %filename,
@@ -479,21 +523,41 @@ async fn delete_file_inner(
         "Import file deleted"
     );
 
-    Ok(Json(serde_json::json!({
-        "ok": true,
-        "transactions_deleted": transactions_deleted,
-    }))
-    .into_response())
+    if htmx {
+        let msg = if with_transactions && transactions_deleted > 0 {
+            format!("Fichier supprimé — {} transaction(s) supprimée(s).", transactions_deleted)
+        } else {
+            "Fichier supprimé.".to_string()
+        };
+        // HX-Trigger fires a custom event on the page; the imports JS listens for
+        // `showFileToast` and displays a toast notification.
+        let trigger = format!(r#"{{"showFileToast":{{"msg":"{}","ok":true}}}}"#, msg);
+        Ok((
+            axum::http::StatusCode::OK,
+            [(axum::http::header::HeaderName::from_static("hx-trigger"), trigger)],
+            "",
+        ).into_response())
+    } else {
+        Ok(Json(serde_json::json!({
+            "ok": true,
+            "transactions_deleted": transactions_deleted,
+        }))
+        .into_response())
+    }
 }
 
 // ── Reparse imported file ─────────────────────────────────────────────────────
 
+/// POST /imported-files/:id/reparse — re-run the parser and add any transactions that
+/// weren't present in the original import (e.g., because the parser was improved later).
+/// Existing transactions are compared by (date, operation, amount) to avoid duplicates.
 pub async fn post_reparse_imported_file(
     State(state): State<AppState>,
     jar: CookieJar,
     Path(file_id): Path<i64>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    match reparse_inner(&state, &jar, file_id).await {
+    match reparse_inner(&state, &jar, file_id, is_htmx(&headers)).await {
         Ok(resp) => resp,
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
     }
@@ -503,6 +567,7 @@ async fn reparse_inner(
     state: &AppState,
     jar: &CookieJar,
     file_id: i64,
+    htmx: bool,
 ) -> AppResult<axum::response::Response> {
     let user_id = super::get_user_id(jar)?;
 
@@ -523,19 +588,18 @@ async fn reparse_inner(
         ));
     }
 
-    // Load the stored PDF
+    // Load the stored PDF from disk and re-run the full parse pipeline.
     let full_path = PathBuf::from(&state.config.storage_path).join(&source_file);
     let file_data = tokio::fs::read(&full_path).await.map_err(|e| {
         AppError::Other(format!("Impossible de lire le fichier en stockage : {}", e))
     })?;
     let bytes = bytes::Bytes::from(file_data);
 
-    // Re-parse
-    let (_, _, new_txs) = safe_detect_and_parse(bytes, &filename).await.map_err(|e| {
+    let (_, _, new_transactions) = safe_detect_and_parse(bytes, &filename).await.map_err(|e| {
         AppError::Other(format!("Erreur de parsing : {}", e))
     })?;
 
-    // Fetch existing transactions for deduplication (date + operation + amount)
+    // Fetch existing transactions for deduplication (date + operation + amount).
     let existing: Vec<(String, String, f64)> = sqlx::query_as(
         "SELECT date, operation, amount FROM transactions WHERE from_file_id = ?",
     )
@@ -552,9 +616,11 @@ async fn reparse_inner(
     let mut added: i64 = 0;
     let mut skipped: i64 = 0;
 
-    for tx in &new_txs {
+    for transaction in &new_transactions {
+        // Skip if a transaction with the same date, operation, and amount already exists.
+        // 0.005 tolerance on amount to handle minor floating-point differences.
         let already_exists = existing.iter().any(|(d, op, amt)| {
-            d == &tx.date && op == &tx.operation && (amt - tx.amount).abs() < 0.005
+            d == &transaction.date && op == &transaction.operation && (amt - transaction.amount).abs() < 0.005
         });
 
         if already_exists {
@@ -562,20 +628,20 @@ async fn reparse_inner(
             continue;
         }
 
-        let status_id: i64 = if tx.parse_note.is_some() { 3 } else { 1 };
+        let status_id: i64 = if transaction.parse_note.is_some() { 3 } else { 1 };
         sqlx::query(
             "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, \
              owner_id, status_id, from_file_id, parse_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(&tx.date)
-        .bind(&tx.transaction_date)
-        .bind(&tx.operation)
-        .bind(tx.amount)
+        .bind(&transaction.date)
+        .bind(&transaction.transaction_date)
+        .bind(&transaction.operation)
+        .bind(transaction.amount)
         .bind(default_currency_id)
         .bind(user_id)
         .bind(status_id)
         .bind(file_id)
-        .bind(&tx.parse_note)
+        .bind(&transaction.parse_note)
         .execute(&state.db)
         .await?;
 
@@ -583,6 +649,10 @@ async fn reparse_inner(
     }
 
     state.events.send(crate::sse::AppEvent { kind: "imports", actor_id: user_id });
+    // Reparse inserts new transaction rows — notify the transactions page too.
+    if added > 0 {
+        state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
+    }
     tracing::info!(
         file_id  = %file_id,
         user_id  = %user_id,
@@ -591,15 +661,30 @@ async fn reparse_inner(
         "Reparse complete"
     );
 
-    Ok(Json(serde_json::json!({
-        "ok":      true,
-        "added":   added,
-        "skipped": skipped,
-        "total":   new_txs.len(),
-    }))
-    .into_response())
+    if htmx {
+        let msg = if added > 0 {
+            format!("{} transaction(s) ajoutée(s), {} déjà présente(s).", added, skipped)
+        } else {
+            "Aucune transaction manquante — tout est déjà à jour.".to_string()
+        };
+        let trigger = format!(r#"{{"showFileToast":{{"msg":"{}","ok":true}}}}"#, msg);
+        Ok((
+            axum::http::StatusCode::OK,
+            [(axum::http::header::HeaderName::from_static("hx-trigger"), trigger)],
+            "",
+        ).into_response())
+    } else {
+        Ok(Json(serde_json::json!({
+            "ok":      true,
+            "added":   added,
+            "skipped": skipped,
+            "total":   new_transactions.len(),
+        }))
+        .into_response())
+    }
 }
 
+/// Strip non-alphanumeric characters from a filename to prevent path traversal attacks.
 fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
