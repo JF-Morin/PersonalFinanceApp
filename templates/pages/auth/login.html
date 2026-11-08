@@ -1,34 +1,15 @@
-<!DOCTYPE html>
-<html lang="fr" class="{% if is_dark %}dark{% endif %}">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Connexion — Finance Perso</title>
-  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="icon" href="/static/icon.png" type="image/png">
-  <link rel="apple-touch-icon" href="/static/icon.png">
-  <link rel="preconnect" href="https://fonts.bunny.net">
-  <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = {
-    darkMode: 'class',
-    theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'] } } }
-  }</script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="/static/login.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-</head>
+{% extends "layout/shell.html" %}
+{#
+  Standalone login page (no sidebar). The profile buttons load their password modal
+  (verify / set) into the shell's #modal-root; error messages after a redirect show
+  in the shell's toast (`flash`, see auth.rs). New profiles can only be created here
+  on first run (no user yet); after that, from the settings page.
+#}
+{% block title %}Connexion — Finance Perso{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/login.css">{% endblock %}
+{% block body_attrs %}class="bg-gray-50 dark:bg-slate-900 min-h-screen flex items-center justify-center p-4 font-sans"{% endblock %}
 
-<!--
-  Single x-data scope wrapping the whole page so user-list buttons and the
-  modal overlay share the same state without cross-scope event dispatch.
-    modal: null | 'verify' | 'set' | 'create'
-    sel:   null | { id, name }
-    pw, pwc, cpw, cpwc, cname, clast, cbank — controlled inputs
--->
-<body class="bg-gray-50 dark:bg-slate-900 min-h-screen flex items-center justify-center p-4 font-sans"
-      x-data="{ modal: null, sel: null, pw: '', pwc: '', cpw: '', cpwc: '', cname: '', clast: '', cbank: '' }">
-
+{% block body %}
 <div class="w-full max-w-sm">
 
   <!-- App identity -->
@@ -42,33 +23,6 @@
     </p>
   </div>
 
-  {% if unauthorized %}
-  <div class="mb-4 flex items-center gap-3 bg-amber-50 dark:bg-amber-900/30
-              border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3
-              text-amber-700 dark:text-amber-300 text-sm">
-    <i class="fas fa-lock flex-shrink-0"></i>
-    Accès refusé. Connectez-vous pour accéder à cette page.
-  </div>
-  {% endif %}
-
-  {% if user_error == "duplicate" %}
-  <div class="mb-4 flex items-center gap-3 bg-red-50 dark:bg-red-900/30
-              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
-              text-red-700 dark:text-red-300 text-sm">
-    <i class="fas fa-circle-xmark flex-shrink-0"></i>
-    Un profil avec ce prénom existe déjà.
-  </div>
-  {% endif %}
-
-  {% if login_error %}
-  <div class="mb-4 flex items-center gap-3 bg-red-50 dark:bg-red-900/30
-              border border-red-200 dark:border-red-700 rounded-xl px-4 py-3
-              text-red-700 dark:text-red-300 text-sm">
-    <i class="fas fa-circle-xmark flex-shrink-0"></i>
-    Mot de passe incorrect. Réessayez.
-  </div>
-  {% endif %}
-
   <!-- Main card -->
   <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6">
 
@@ -78,9 +32,9 @@
       {% for user in users %}
 
       {% if user.has_password %}
-      <!-- Returning user → verify password modal -->
+      <!-- Returning user → verify-password modal -->
       <button type="button" class="user-btn"
-              @click="sel = { id: {{ user.id }}, name: '{{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}' }; pw = ''; modal = 'verify'">
+              hx-get="/login/users/{{ user.id }}" hx-target="#modal-root" hx-swap="innerHTML">
         <span class="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 flex items-center
                      justify-center text-indigo-600 dark:text-indigo-400 font-bold flex-shrink-0 text-sm">
           {{ user.name | upper | truncate(length=1, end="") }}
@@ -96,10 +50,10 @@
         <i class="fas fa-chevron-right text-gray-300 dark:text-slate-600 text-xs"></i>
       </button>
 
-      {% else %}
-      <!-- First login → set password modal -->
+      {% elif can_set_password %}
+      <!-- Nobody has a password yet → this login sets it (set-password modal) -->
       <button type="button" class="user-btn amber"
-              @click="sel = { id: {{ user.id }}, name: '{{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}' }; pw = ''; pwc = ''; modal = 'set'">
+              hx-get="/login/users/{{ user.id }}" hx-target="#modal-root" hx-swap="innerHTML">
         <span class="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/50 flex items-center
                      justify-center text-amber-600 dark:text-amber-400 font-bold flex-shrink-0 text-sm">
           {{ user.name | upper | truncate(length=1, end="") }}
@@ -114,18 +68,27 @@
         </div>
         <i class="fas fa-chevron-right text-gray-300 dark:text-slate-600 text-xs"></i>
       </button>
+
+      {% else %}
+      <!-- No password: can't log in until one is set from the settings page -->
+      <div class="user-btn amber opacity-60 cursor-not-allowed" aria-disabled="true"
+           title="Mot de passe à définir depuis les Paramètres par un utilisateur connecté">
+        <span class="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/50 flex items-center
+                     justify-center text-amber-600 dark:text-amber-400 font-bold flex-shrink-0 text-sm">
+          {{ user.name | upper | truncate(length=1, end="") }}
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+            {{ user.name }}{% if user.last_name %} {{ user.last_name }}{% endif %}
+          </div>
+          <div class="text-xs text-amber-500 dark:text-amber-400 mt-0.5">
+            <i class="fas fa-lock text-[10px] mr-0.5"></i> Pas de mot de passe — à définir dans les Paramètres
+          </div>
+        </div>
+      </div>
       {% endif %}
 
       {% endfor %}
-    </div>
-
-    <!-- ── Create new profile button (when users already exist) ── -->
-    <div class="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
-      <button type="button" class="btn-full-indigo"
-              style="background-color:#64748b"
-              @click="cname=''; clast=''; cbank=''; cpw=''; cpwc=''; modal='create'">
-        <i class="fas fa-user-plus"></i> Créer un profil
-      </button>
     </div>
 
     {% else %}
@@ -185,9 +148,4 @@
 
   </div><!-- /card -->
 </div><!-- /centered wrapper -->
-
-
-{% include "modal/login.html" %}
-
-</body>
-</html>
+{% endblock %}

@@ -1,24 +1,49 @@
 {#
   Participants share inputs (current user first, then the others).
-  Set `share_prefix` before including — element ids become
-  <prefix>-shares-total / <prefix>-shares-list / <prefix>-share-error.
+  Expects `users`, `current_user_id` and `shares_init` ({"<user_id>": share}) in the
+  context. The Alpine state shows the live total, caps each input so the total
+  stays ≤ 100 %, and submits everything as one `shares_json` field with the
+  enclosing form. The server checks the limit again (handlers::transactions::parse_shares).
 #}
-<label class="label">
-  Participants
-  <span id="{{ share_prefix }}-shares-total" class="text-xs font-normal ml-1" style="color:#f59e0b">(0%)</span>
-</label>
-<div id="{{ share_prefix }}-shares-list" class="share-inline-list">
-  {% for u in users | default(value=[]) %}{% if u.id == current_user.id %}
-  <div class="share-inline-row">
-    <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %} <span class="text-xs text-indigo-500 font-medium">(vous)</span></span>
-    <input type="number" min="0" max="100" step="0.5" class="input text-sm share-inline-input" data-user-id="{{ u.id }}" placeholder="0">
+<div x-data="{
+       shares: {{ shares_init | json_encode() }},
+       value(id) { return parseFloat(this.shares[id]) || 0 },
+       get total() { return Object.keys(this.shares).reduce((sum, id) => sum + this.value(id), 0) },
+       max(id) { return Math.max(0, Math.round((100 - this.total + this.value(id)) * 10) / 10) },
+       get json() {
+         return JSON.stringify(Object.keys(this.shares)
+           .filter(id => this.value(id) > 0)
+           .map(id => ({ user_id: Number(id), share: this.value(id) })))
+       }
+     }">
+  <label class="label">
+    Participants
+    <span class="text-xs font-normal ml-1"
+          :class="Math.abs(total - 100) < 0.01 ? 'text-green-600' : 'text-amber-500'"
+          x-text="'(' + Math.round(total * 10) / 10 + '%)'"></span>
+  </label>
+  <input type="hidden" name="shares_json" :value="json">
+  <div class="share-inline-list">
+    {% for u in users %}{% if u.id == current_user_id %}
+    <div class="share-inline-row">
+      <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %} <span class="text-xs text-indigo-500 font-medium">(vous)</span></span>
+      <input type="number" min="0" step="0.5" placeholder="0"
+             class="input text-sm share-inline-input"
+             x-model="shares['{{ u.id }}']" :max="max('{{ u.id }}')"
+             @keydown.enter.prevent="$el.blur()">
+    </div>
+    {% endif %}{% endfor %}
+    {% for u in users %}{% if u.id != current_user_id %}
+    <div class="share-inline-row">
+      <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span>
+      <input type="number" min="0" step="0.5" placeholder="0"
+             class="input text-sm share-inline-input"
+             x-model="shares['{{ u.id }}']" :max="max('{{ u.id }}')"
+             @keydown.enter.prevent="$el.blur()">
+    </div>
+    {% endif %}{% endfor %}
   </div>
-  {% endif %}{% endfor %}
-  {% for u in users | default(value=[]) %}{% if u.id != current_user.id %}
-  <div class="share-inline-row">
-    <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span>
-    <input type="number" min="0" max="100" step="0.5" class="input text-sm share-inline-input" data-user-id="{{ u.id }}" placeholder="0">
-  </div>
-  {% endif %}{% endfor %}
+  <p x-show="total > 100.001" x-cloak class="text-xs text-red-500 mt-1">
+    La somme des parts ne peut pas dépasser 100 %.
+  </p>
 </div>
-<p id="{{ share_prefix }}-share-error" class="text-xs text-red-500 mt-1" style="display:none"></p>

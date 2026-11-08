@@ -17,7 +17,7 @@ use axum::{
         IntoResponse,
     },
 };
-use axum_extra::extract::CookieJar;
+use axum_extra::extract::cookie::SignedCookieJar;
 use serde::Serialize;
 use std::convert::Infallible;
 use tokio::sync::broadcast;
@@ -29,7 +29,8 @@ use crate::{error::AppResult, AppState};
 /// can match it with `hx-trigger="sse:transactions from:body"` etc.
 #[derive(Clone, Debug, Serialize)]
 pub struct AppEvent {
-    /// One of "transactions", "imports", "settings" — matches the SSE trigger names in templates.
+    /// One of "transactions", "imports", "settings" (app preferences), "users" — matches
+    /// the `sse:<kind>` trigger names in templates.
     pub kind: &'static str,
     /// ID of the user who caused the change.
     pub actor_id: i64,
@@ -66,7 +67,7 @@ impl EventBus {
 /// Requires authentication; unauthenticated requests return a redirect via AppError::Unauthorized.
 pub async fn get_events(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
 ) -> AppResult<impl IntoResponse> {
     crate::handlers::get_user_id(&jar)?;
 

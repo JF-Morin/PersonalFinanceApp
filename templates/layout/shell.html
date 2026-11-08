@@ -1,0 +1,117 @@
+{#
+  Page shell: <head>, the modal layer and the toast. layout/base.html (the app with
+  sidebar and bars) and pages/auth/login.html extend it.
+#}
+<!DOCTYPE html>
+<html lang="fr" class="{% if is_dark %}dark{% endif %}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Finance Perso{% endblock %}</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icon.png">
+
+  <link rel="preconnect" href="https://fonts.bunny.net">
+  <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&family=jetbrains-mono:400,500,600,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+          fontSize: {
+            'xs':   ['0.75rem',  { lineHeight: '1rem'    }],
+            'sm':   ['0.875rem', { lineHeight: '1.25rem' }],
+            'base': ['1rem',     { lineHeight: '1.5rem'  }],
+            'lg':   ['1.125rem', { lineHeight: '1.75rem' }],
+            'xl':   ['1.25rem',  { lineHeight: '1.75rem' }],
+            '2xl':  ['1.5rem',   { lineHeight: '2rem'    }],
+            '3xl':  ['1.875rem', { lineHeight: '2.25rem' }],
+            '4xl':  ['2.25rem',  { lineHeight: '2.5rem'  }],
+          },
+          colors: {
+            primary: {
+              50:  '#eef2ff',
+              100: '#e0e7ff',
+              200: '#c7d2fe',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#312e81',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/components.css">
+  {# Loaded on every page, not per page: boosted navigation (hx-boost) only swaps
+     <body>, so a stylesheet linked from one page's head block would be missing
+     whenever that page is reached from the sidebar. #}
+  <link rel="stylesheet" href="/static/transactions.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.11/dist/htmx.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.4/sse.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  {% block head %}{% endblock %}
+</head>
+
+<body {% block body_attrs %}class="bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-gray-100 font-sans text-base"{% endblock %}>
+{% block body %}{% endblock %}
+
+<!--
+  The one modal layer of the app. Server-rendered modals are swapped in here
+  (hx-get=… hx-target="#modal-root" hx-swap="innerHTML") and contain only their card.
+  The overlay is shown while it has content (app.css), and close() empties it:
+  modals call close() from their ✕ / Annuler buttons; Esc, a click on the backdrop
+  and the `close-modal` event (HX-Trigger) call it too.
+-->
+<div id="modal-root"
+     x-data="{ close() { document.getElementById('modal-root').replaceChildren() } }"
+     @click.self="close()"
+     @keydown.escape.window="close()"
+     @close-modal.window="close()"></div>
+
+<!--
+  The one notification toast. Fired by HX-Trigger {"toast": {"msg": "…", "ok": true}}
+  (handlers::toast_header), on page load by a `flash` in the context (handlers::insert_flash,
+  used after plain form-post redirects), and for every failed HTMX request: an error status
+  (htmx:responseError — shows the server's short plain-text message when there is one) or
+  no answer at all (htmx:sendError — server down / network lost).
+-->
+<div id="toast"
+     x-data="{
+       show: false, msg: '', ok: true, timer: null,
+       notify(msg, ok) {
+         this.msg = msg; this.ok = ok !== false; this.show = true;
+         clearTimeout(this.timer); this.timer = setTimeout(() => this.show = false, 5000);
+       },
+       errorMessage(xhr) {
+         const text = (xhr.responseText || '').trim();
+         return text && text.length < 300 && !text.startsWith('<')
+           ? text
+           : 'Erreur serveur (' + xhr.status + '). Réessayez.';
+       }
+     }"
+     {% if flash %}x-init="notify({{ flash.msg | json_encode() }}, {{ flash.ok }})"{% endif %}
+     @toast.window="notify($event.detail.msg, $event.detail.ok)"
+     @htmx:response-error.window="notify(errorMessage($event.detail.xhr), false)"
+     @htmx:send-error.window="notify('Connexion au serveur impossible. Vérifiez votre réseau.', false)"
+     x-show="show" x-cloak x-transition.opacity
+     role="status" aria-live="polite"
+     class="fixed bottom-6 right-6 z-[1000] text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2"
+     :class="ok ? 'bg-emerald-600' : 'bg-red-600'">
+  <i class="fas" :class="ok ? 'fa-check-circle' : 'fa-circle-xmark'"></i>
+  <span x-text="msg"></span>
+</div>
+
+</body>
+</html>

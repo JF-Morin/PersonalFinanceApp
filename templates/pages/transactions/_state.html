@@ -1,0 +1,13 @@
+{#
+  Current sort (submitted with the filter form) and the CSV link for the current
+  filters. Part of the filter form on a full page load; sent again out-of-band
+  (`oob`) with every table fragment so both stay in sync with the table.
+#}
+<div id="transactions-state" class="contents"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <input type="hidden" name="dir" value="{{ dir }}">
+  <a href="/transactions/export.csv?{{ full_query }}" class="btn-secondary filter-ctrl"
+     style="align-self:flex-end" title="Exporter en CSV (filtres appliqués)">
+    <i class="fas fa-file-csv mr-1"></i> CSV
+  </a>
+</div>

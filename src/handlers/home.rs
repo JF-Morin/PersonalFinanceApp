@@ -5,7 +5,7 @@
 /// partial endpoint (`/home/balances`, `/home/chart-part`, `/home/stats-row`) so
 /// HTMX can swap each one independently without reloading the full page.
 use axum::{extract::State, response::Html};
-use axum_extra::extract::CookieJar;
+use axum_extra::extract::cookie::SignedCookieJar;
 use std::collections::HashMap;
 
 use crate::{db::DbPool, error::AppResult, models::{Currency, UserPairBalance}, AppState};
@@ -234,36 +234,16 @@ async fn compute_chart_data(db: &DbPool) -> AppResult<(Vec<String>, Vec<f64>)> {
 /// GET / — full home page (initial render, includes pre-rendered partials for SSR).
 pub async fn get_home(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
 ) -> AppResult<Html<String>> {
     let user_id = super::get_user_id(&jar)?;
-    let mut ctx = base_context(&jar, &state.db).await?;
+    let mut ctx = base_context(&jar, &state.db, "/").await?;
 
     let pair_balances = compute_balances(&state.db).await?;
     let (category_labels, category_totals) = compute_chart_data(&state.db).await?;
 
-    let total_transactions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
-        .fetch_one(&state.db)
-        .await?;
-    // Exclude the synthetic "manual" file row that is created for manually-added transactions.
-    let total_files: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM imported_files WHERE filename != 'manual'"
-    )
-    .fetch_one(&state.db)
-    .await?;
-    let pending_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM transactions t \
-         JOIN transaction_status s ON t.status_id = s.id \
-         WHERE s.name IN ('pending', 'broken') AND t.owner_id = ?"
-    )
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-
+    insert_stats(&mut ctx, &state.db, user_id).await?;
     ctx.insert("pair_balances", &pair_balances);
-    ctx.insert("pending_count", &pending_count);
-    ctx.insert("total_transactions", &total_transactions);
-    ctx.insert("total_files", &total_files);
     ctx.insert("category_labels", &category_labels);
     ctx.insert("category_totals", &category_totals);
 
@@ -274,7 +254,7 @@ pub async fn get_home(
 /// GET /home/balances — partial for the balances card, refreshed by SSE.
 pub async fn get_balances_partial(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
 ) -> AppResult<Html<String>> {
     super::get_user_id(&jar)?;
     let pair_balances = compute_balances(&state.db).await?;
@@ -284,19 +264,16 @@ pub async fn get_balances_partial(
     Ok(Html(html))
 }
 
-/// GET /home/stats-row — partial for the three stat counters at the top of the home page.
-pub async fn get_stats_row(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> AppResult<Html<String>> {
-    let user_id = super::get_user_id(&jar)?;
+/// The stat counters shown in `_stats_row.html`.
+async fn insert_stats(ctx: &mut tera::Context, db: &crate::db::DbPool, user_id: i64) -> AppResult<()> {
     let total_transactions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
-        .fetch_one(&state.db)
+        .fetch_one(db)
         .await?;
+    // Exclude the synthetic "manual" file row that is created for manually-added transactions.
     let total_files: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM imported_files WHERE filename != 'manual'"
     )
-    .fetch_one(&state.db)
+    .fetch_one(db)
     .await?;
     let pending_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM transactions t \
@@ -304,12 +281,22 @@ pub async fn get_stats_row(
          WHERE s.name IN ('pending', 'broken') AND t.owner_id = ?"
     )
     .bind(user_id)
-    .fetch_one(&state.db)
+    .fetch_one(db)
     .await?;
-    let mut ctx = tera::Context::new();
     ctx.insert("total_transactions", &total_transactions);
     ctx.insert("total_files", &total_files);
     ctx.insert("pending_count", &pending_count);
+    Ok(())
+}
+
+/// GET /home/stats-row — partial for the stat counters at the top of the home page.
+pub async fn get_stats_row(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+) -> AppResult<Html<String>> {
+    let user_id = super::get_user_id(&jar)?;
+    let mut ctx = tera::Context::new();
+    insert_stats(&mut ctx, &state.db, user_id).await?;
     let html = state.tera.render("pages/home/_stats_row.html", &ctx)?;
     Ok(Html(html))
 }
@@ -317,7 +304,7 @@ pub async fn get_stats_row(
 /// GET /home/chart-part — partial for the doughnut chart section, refreshed by SSE.
 pub async fn get_chart_part(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
 ) -> AppResult<Html<String>> {
     super::get_user_id(&jar)?;
     let (category_labels, category_totals) = compute_chart_data(&state.db).await?;

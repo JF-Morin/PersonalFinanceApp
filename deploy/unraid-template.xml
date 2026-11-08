@@ -33,7 +33,7 @@
     Target="COOKIE_SECRET"
     Default=""
     Mode=""
-    Description="REQUIRED — Random 32+ character string used to sign session cookies. Generate one with: openssl rand -base64 32"
+    Description="REQUIRED — Random secret (32+ characters) that signs the login cookie, so nobody can forge a login. Generate one with: openssl rand -hex 32. Keep it private and stable: the app refuses to start if it is shorter than 32 characters, and changing it logs everyone out."
     Type="Variable"
     Display="always"
     Required="true"
@@ -72,6 +72,53 @@
     Display="advanced"
     Required="false"
     Mask="false">/mnt/user/appdata/PersonalFinanceApp/logs</Config>
+
+  <!-- ── Backups ─────────────────────────────────────────────────────────── -->
+  <!-- The app writes a consistent snapshot of the database (SQLite VACUUM INTO) at
+       startup, before migrations, then every BACKUP_INTERVAL_HOURS. -->
+  <Config
+    Name="Backup folder"
+    Target="/app/backups"
+    Default="/mnt/user/appdata/PersonalFinanceApp/backups"
+    Mode="rw"
+    Description="Where database backups (finance_YYYYMMDD_HHMMSS.db) are written. Best on another disk than the database folder, e.g. a share on the array such as /mnt/user/backups/PersonalFinanceApp. To restore: stop the container, replace finance.db in the Database folder with a backup (delete finance.db-wal / finance.db-shm if present), start it."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/PersonalFinanceApp/backups</Config>
+
+  <Config
+    Name="BACKUP_DIR"
+    Target="BACKUP_DIR"
+    Default="/app/backups"
+    Mode=""
+    Description="Internal path for backups. Must match the container side of the Backup folder volume above."
+    Type="Variable"
+    Display="advanced"
+    Required="true"
+    Mask="false">/app/backups</Config>
+
+  <Config
+    Name="Backups to keep (BACKUP_KEEP)"
+    Target="BACKUP_KEEP"
+    Default="14"
+    Mode=""
+    Description="Number of most recent backups kept; older ones are deleted automatically. With daily backups, 14 is two weeks (restarts add extra backups)."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">14</Config>
+
+  <Config
+    Name="Backup interval in hours (BACKUP_INTERVAL_HOURS)"
+    Target="BACKUP_INTERVAL_HOURS"
+    Default="24"
+    Mode=""
+    Description="Hours between automatic backups while the container runs. 0 = only at container start."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">24</Config>
 
   <!-- ── Internal paths (rarely need changing) ──────────────────────────── -->
   <Config

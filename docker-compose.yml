@@ -15,6 +15,13 @@ services:
       COOKIE_SECRET: ${COOKIE_SECRET:-change-this-in-production-32bytes!!}
       # Override log verbosity if needed: RUST_LOG=personal_finance_app=trace,tower_http=debug
       RUST_LOG: ${RUST_LOG:-personal_finance_app=debug,tower_http=info}
+      # Database backups (see src/backup.rs): at startup, then every BACKUP_INTERVAL_HOURS.
+      # Tip: keep them on another disk than the database — e.g. add a volume
+      #   - /mnt/user/backups/personal-finance:/app/backups
+      # and set BACKUP_DIR=/app/backups in .env.
+      BACKUP_DIR: ${BACKUP_DIR:-/app/data/db-backup}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
     volumes:
       # SQLite database — persisted locally
       - ./data:/app/data

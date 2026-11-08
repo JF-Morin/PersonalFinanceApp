@@ -17,6 +17,12 @@ pub struct Config {
     pub server_port: u16,
     /// Secret used to sign session cookies.  Change this in production.
     pub cookie_secret: String,
+    /// Folder for database backups (`finance_YYYYMMDD_HHMMSS.db`), see `backup.rs`.
+    pub backup_dir: String,
+    /// How many backups to keep (oldest are deleted).
+    pub backup_keep: usize,
+    /// Hours between automatic backups while the app runs (0 = only at startup).
+    pub backup_interval_hours: u64,
 }
 
 impl Config {
@@ -35,6 +41,30 @@ impl Config {
                 .parse()?,
             cookie_secret: env::var("COOKIE_SECRET")
                 .unwrap_or_else(|_| "change-this-secret-in-production-32bytes!!".to_string()),
-        })
+            backup_dir: env::var("BACKUP_DIR")
+                .unwrap_or_else(|_| "./data/db-backup".to_string()),
+            backup_keep: env::var("BACKUP_KEEP")
+                .unwrap_or_else(|_| "14".to_string())
+                .parse()?,
+            backup_interval_hours: env::var("BACKUP_INTERVAL_HOURS")
+                .unwrap_or_else(|_| "24".to_string())
+                .parse()?,
+        }
+        .checked()?)
+    }
+
+    /// Validate the settings that would make the app insecure.
+    fn checked(self) -> anyhow::Result<Self> {
+        // The session cookie is signed with a key derived from this secret.
+        if self.cookie_secret.len() < 32 {
+            anyhow::bail!("COOKIE_SECRET must be at least 32 bytes long (it signs the login cookie)");
+        }
+        if self.cookie_secret.starts_with("change-this") {
+            tracing::warn!(
+                "COOKIE_SECRET is still the example value — set your own random secret in .env, \
+                 or anyone who knows the default can forge a login cookie"
+            );
+        }
+        Ok(self)
     }
 }

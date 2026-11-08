@@ -1,134 +1,132 @@
 {#
-  The inline display:none is required, not redundant with x-cloak: on a boosted
-  /settings → /settings navigation, htmx "settles" elements whose id exists in
-  both pages by restoring the server-rendered style attribute ~20ms after the
-  swap. Without it, htmx strips the display:none that Alpine's x-show had just
-  set, and the modal pops open empty. x-show still toggles it normally.
+  Rendered alone by GET /settings/users/:id/edit into #modal-root.
+  Only the card (the overlay and close() come from layout/shell.html).
+  The Alpine state only drives the form (live "can save" check); the server
+  answers the POST with HX-Trigger {"toast", "close-modal", "users-changed"} (the whole
+  users table re-fetches itself), or an error message swapped into #edit-user-error.
+  Values are json_encode'd and then HTML-escaped by Tera, which is what makes
+  them valid JS inside the double-quoted x-data attribute.
 #}
-<div id="settings-edit-modal"
-     x-show="editModal"
-     x-cloak
-     style="display: none;"
-     class="fixed inset-0 z-50 flex items-center justify-center p-4">
+<div x-data="{
+     name: {{ user.name | json_encode() }},
+     lastName: {{ user.last_name | json_encode() }},
+     bankId: {{ user.bank_id | json_encode() }},
+     hasPw: {{ user.has_password }},
+     origName: {{ user.name | json_encode() }},
+     origLast: {{ user.last_name | json_encode() }},
+     origBank: {{ user.bank_id | json_encode() }},
+     oldPw: '', newPw: '', newPwc: '',
+     get pwFull() {
+       if (!this.hasPw) return !!(this.newPw && this.newPwc && this.newPw === this.newPwc);
+       return !!(this.oldPw && this.newPw && this.newPwc && this.newPw === this.newPwc);
+     },
+     get pwEmpty() { return !this.oldPw && !this.newPw && !this.newPwc; },
+     get pwValid() { return this.pwEmpty || this.pwFull; },
+     get profileChanged() {
+       return this.name !== this.origName || this.lastName !== this.origLast || this.bankId !== this.origBank;
+     },
+     get canSave() { return this.pwValid && (this.profileChanged || this.pwFull); }
+   }"
+   class="modal-sheet relative w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6">
 
-  <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"
-       @click="editModal = false"></div>
+  <div class="flex items-center justify-between mb-5">
+    <div class="flex items-center gap-3">
+      <span class="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/50
+                   text-primary-600 dark:text-primary-400 font-bold text-sm
+                   flex items-center justify-center flex-shrink-0"
+            x-text="name ? name.charAt(0).toUpperCase() : '?'">
+      </span>
+      <div>
+        <div class="font-bold text-gray-900 dark:text-gray-100 text-sm"
+             x-text="name || 'Utilisateur'"></div>
+        <div class="text-xs text-gray-400 dark:text-gray-500">Modifier le profil</div>
+      </div>
+    </div>
+    <button type="button" @click="close()"
+            class="w-8 h-8 flex items-center justify-center rounded-full
+                   text-gray-400 hover:text-gray-600 dark:hover:text-gray-200
+                   hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors border-none cursor-pointer">
+      <i class="fas fa-xmark"></i>
+    </button>
+  </div>
 
-  <div class="modal-sheet relative w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6"
-       @click.stop>
+  <form hx-post="/settings/users/{{ user.id }}/edit"
+        hx-swap="none"
+        class="space-y-4">
 
-    <div class="flex items-center justify-between mb-5">
-      <div class="flex items-center gap-3">
-        <span class="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/50
-                     text-primary-600 dark:text-primary-400 font-bold text-sm
-                     flex items-center justify-center flex-shrink-0"
-              x-text="editUser.name ? editUser.name.charAt(0).toUpperCase() : '?'">
-        </span>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="label">Prénom *</label>
+        <input type="text" name="name" x-model="name" required class="input"
+               autocomplete="given-name">
+      </div>
+      <div>
+        <label class="label">Nom</label>
+        <input type="text" name="last_name" x-model="lastName" class="input"
+               autocomplete="family-name">
+      </div>
+    </div>
+
+    <div>
+      <label class="label">Banque</label>
+      <select name="bank_id" class="input" x-model="bankId">
+        <option value="">— Aucune —</option>
+        {% for b in banks %}
+        <option value="{{ b.id }}">{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="border-t border-gray-100 dark:border-slate-700 pt-4">
+      <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500 mb-3">
+        Mot de passe
+        <span class="normal-case font-normal">(laisser vide pour ne pas modifier)</span>
+      </p>
+      <div class="space-y-3">
+        {% if user.has_password %}
         <div>
-          <div class="font-bold text-gray-900 dark:text-gray-100 text-sm"
-               x-text="editUser.name || 'Utilisateur'"></div>
-          <div class="text-xs text-gray-400 dark:text-gray-500">Modifier le profil</div>
+          <label class="label">Mot de passe actuel</label>
+          <input type="password" name="old_password" x-model="oldPw"
+                 class="input" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        {% endif %}
+        <div>
+          <label class="label">Nouveau mot de passe</label>
+          <input type="password" name="new_password" x-model="newPw"
+                 class="input" placeholder="••••••••" autocomplete="new-password">
+        </div>
+        <div>
+          <label class="label">Confirmer</label>
+          <input type="password" name="new_password_confirm" x-model="newPwc"
+                 class="input" placeholder="••••••••" autocomplete="new-password">
+          <p x-show="newPwc.length > 0 && newPw !== newPwc" x-cloak
+             class="text-red-500 dark:text-red-400 text-xs mt-1.5">
+            <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
+          </p>
         </div>
       </div>
-      <button @click="editModal = false"
-              class="w-8 h-8 flex items-center justify-center rounded-full
-                     text-gray-400 hover:text-gray-600 dark:hover:text-gray-200
-                     hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors border-none cursor-pointer">
-        <i class="fas fa-xmark"></i>
+    </div>
+
+    <!-- Filled by the server on a validation error (HX-Retarget); hidden while empty -->
+    <div id="edit-user-error"
+         class="empty:hidden text-sm text-red-600 dark:text-red-400 rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2"></div>
+
+    <div class="flex gap-3 pt-1">
+      <button type="button" @click="close()"
+              class="flex-1 py-2.5 rounded-lg text-sm font-semibold
+                     bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600
+                     text-gray-700 dark:text-gray-200 border-none cursor-pointer transition-colors">
+        Annuler
+      </button>
+      <button type="submit"
+              :disabled="!canSave"
+              class="flex-1 py-2.5 rounded-lg text-sm font-semibold
+                     bg-indigo-600 hover:bg-indigo-700 text-white
+                     disabled:opacity-40 disabled:cursor-not-allowed
+                     border-none cursor-pointer transition-colors shadow-md">
+        <i class="fas fa-check mr-1"></i> Enregistrer
       </button>
     </div>
 
-    <form id="edit-user-form"
-          x-effect="if (editUser.id) { $el.setAttribute('hx-post', '/settings/users/' + editUser.id + '/edit'); $el.setAttribute('hx-target', '#user-row-' + editUser.id); htmx.process($el); }"
-          hx-swap="outerHTML"
-          class="space-y-4">
-
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="label">Prénom *</label>
-          <input type="text" name="name" x-model="editUser.name" required class="input"
-                 autocomplete="given-name">
-        </div>
-        <div>
-          <label class="label">Nom</label>
-          <input type="text" name="last_name" x-model="editUser.last_name" class="input"
-                 autocomplete="family-name">
-        </div>
-      </div>
-
-      <div>
-        <label class="label">Banque</label>
-        <select name="bank_id" class="input" x-model="editUser.bank_id">
-          <option value="">— Aucune —</option>
-          {% for b in banks | default(value=[]) %}
-          <option value="{{ b.id }}">{{ b.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="border-t border-gray-100 dark:border-slate-700 pt-4">
-        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500 mb-3">
-          Mot de passe
-          <span class="normal-case font-normal">(laisser vide pour ne pas modifier)</span>
-        </p>
-        <div class="space-y-3">
-          <div x-show="editUser.hasPw">
-            <label class="label">Mot de passe actuel</label>
-            <input type="password" name="old_password" x-model="oldPw"
-                   class="input" placeholder="••••••••" autocomplete="current-password">
-          </div>
-          <div>
-            <label class="label">Nouveau mot de passe</label>
-            <input type="password" name="new_password" x-model="newPw"
-                   class="input" placeholder="••••••••" autocomplete="new-password">
-          </div>
-          <div>
-            <label class="label">Confirmer</label>
-            <input type="password" name="new_password_confirm" x-model="newPwc"
-                   class="input" placeholder="••••••••" autocomplete="new-password">
-            <p x-show="newPwc.length > 0 && newPw !== newPwc" x-cloak
-               class="text-red-500 dark:text-red-400 text-xs mt-1.5">
-              <i class="fas fa-circle-xmark mr-1"></i>Les mots de passe ne correspondent pas
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div id="edit-user-server-error"
-           class="text-sm text-red-600 dark:text-red-400 rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2"
-           style="display:none"></div>
-
-      <div class="flex gap-3 pt-1">
-        <button type="button" @click="editModal = false"
-                class="flex-1 py-2.5 rounded-lg text-sm font-semibold
-                       bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600
-                       text-gray-700 dark:text-gray-200 border-none cursor-pointer transition-colors">
-          Annuler
-        </button>
-        <button type="submit"
-                :disabled="!canSave"
-                class="flex-1 py-2.5 rounded-lg text-sm font-semibold
-                       bg-indigo-600 hover:bg-indigo-700 text-white
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       border-none cursor-pointer transition-colors shadow-md">
-          <i class="fas fa-check mr-1"></i> Enregistrer
-        </button>
-      </div>
-
-    </form>
-  </div>
+  </form>
 </div>
-
-<script>
-document.getElementById('edit-user-form').addEventListener('htmx:afterRequest', function(e) {
-  if (e.detail.successful) {
-    var comp = Alpine.$data(document.getElementById('settings-root'));
-    if (comp) { comp.editModal = false; comp.oldPw = ''; comp.newPw = ''; comp.newPwc = ''; }
-    document.getElementById('edit-user-server-error').style.display = 'none';
-  } else {
-    var errEl = document.getElementById('edit-user-server-error');
-    errEl.textContent = e.detail.xhr.responseText || 'Erreur serveur.';
-    errEl.style.display = '';
-  }
-});
-</script>

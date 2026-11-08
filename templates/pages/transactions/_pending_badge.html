@@ -1,12 +1,19 @@
-<button id="btn-open-carousel"
-        class="btn-warning"
-        hx-get="/transactions/pending-badge"
-        hx-trigger="refresh, sse:transactions"
-        hx-swap="outerHTML"
-        {% if pending_count == 0 %}disabled title="Toutes les transactions sont complètes"{% else %}title="À compléter"{% endif %}>
-  {% if pending_count > 0 %}
-  <i class="fas fa-tasks mr-1"></i> <span class="btn-label">À compléter</span> ({{ pending_count }})
-  {% else %}
-  <i class="fas fa-check-circle mr-1"></i> <span class="btn-label">À compléter</span> (0)
-  {% endif %}
-</button>
+{#
+  Rendered alone by GET /transactions/pending-badge. The wrapper re-fetches itself on
+  SSE / `transactions-changed`; the button opens the carousel in #modal-root.
+#}
+<span id="pending-badge"
+      hx-get="/transactions/pending-badge"
+      hx-trigger="sse:transactions, transactions-changed from:body, htmx:sseOpen from:body, visibilitychange[document.visibilityState=='visible'] from:document"
+      hx-swap="outerHTML"
+      hx-sync="this:replace">
+  <button class="btn-warning"
+          hx-get="/transactions/pending" hx-target="#modal-root" hx-swap="innerHTML"
+          {% if pending_count == 0 %}disabled title="Toutes les transactions sont complètes"{% else %}title="À compléter"{% endif %}>
+    {% if pending_count > 0 %}
+    <i class="fas fa-tasks mr-1"></i> <span class="btn-label">À compléter</span> ({{ pending_count }})
+    {% else %}
+    <i class="fas fa-check-circle mr-1"></i> <span class="btn-label">À compléter</span> (0)
+    {% endif %}
+  </button>
+</span>

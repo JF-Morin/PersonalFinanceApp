@@ -17,7 +17,7 @@ This prompt's purpose is to restructure the ui and templates
         - Menu:
             - Home => navigates to "/"
             - Transactions => navigates to "/transactions"
-            - Imports => navigates to "/imports"
+            - Imports => navigates to "/imported-files"
             - Settings => navigates to "/settings"
         - Logout => logs the user out => navigates to /login
     - Right side (main section):

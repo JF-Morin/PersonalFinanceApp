@@ -48,12 +48,13 @@ pub async fn get_setting(pool: &DbPool, key: &str) -> anyhow::Result<String> {
     Ok(row)
 }
 
-/// Upsert a value into the `settings` key/value table.
-pub async fn set_setting(pool: &DbPool, key: &str, value: &str) -> anyhow::Result<()> {
+/// Upsert a value into the `settings` key/value table. Takes any executor, so it can run
+/// on the pool or inside a DB transaction (`&mut *tx`).
+pub async fn set_setting<'e, E: sqlx::SqliteExecutor<'e>>(executor: E, key: &str, value: &str) -> anyhow::Result<()> {
     sqlx::query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
         .bind(key)
         .bind(value)
-        .execute(pool)
+        .execute(executor)
         .await?;
     Ok(())
 }

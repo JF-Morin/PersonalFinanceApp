@@ -1,0 +1,94 @@
+{#
+  Rendered alone by GET /settings/users. Delete buttons only for the admin
+  (`current_user.is_admin`). Always swapped as a whole — rows are never
+  added, removed or replaced one by one. Re-fetches itself on SSE `users` (any user
+  was added, edited or deleted), on `users-changed` (this user's own add/edit/delete),
+  and when the SSE connection (re)opens or the tab becomes visible again (phones).
+#}
+<div id="users-table"
+     hx-get="/settings/users"
+     hx-trigger="sse:users, users-changed from:body, htmx:sseOpen from:body, visibilitychange[document.visibilityState=='visible'] from:document"
+     hx-swap="outerHTML"
+     hx-sync="this:replace"
+     hx-disinherit="*">
+  {% if users %}
+  <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-slate-600 mb-5">
+    <table class="w-full min-w-[40rem]">
+      <thead class="bg-gray-50 dark:bg-slate-700/60">
+        <tr class="border-b border-gray-200 dark:border-slate-600">
+          <th class="table-header">Prénom</th>
+          <th class="table-header">Nom</th>
+          <th class="table-header">Banque</th>
+          <th class="table-header">MDP</th>
+          <th class="table-header">Dernière connexion</th>
+          <th class="table-header w-36"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+        {% for u in users %}
+        <tr>
+          <td class="table-cell font-medium text-gray-900 dark:text-gray-100">{{ u.name }}{% if u.is_admin %}
+            <span class="ml-1.5 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide
+                         text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/40 px-1.5 py-0.5 rounded-full"
+                  title="Administrateur : seul à pouvoir supprimer des utilisateurs">
+              <i class="fas fa-shield-halved"></i> Admin
+            </span>{% endif %}</td>
+          <td class="table-cell text-gray-600 dark:text-gray-300">{{ u.last_name | default(value="—") }}</td>
+          <td class="table-cell text-gray-500 dark:text-gray-400">
+            {% for b in banks %}{% if b.id == u.bank_id %}{{ b.name }}{% endif %}{% endfor %}
+            {% if not u.bank_id %}—{% endif %}
+          </td>
+          <td class="table-cell">
+            {% if u.password_hash %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400
+                         bg-green-50 dark:bg-green-900/30 px-2 py-0.5 rounded-full">
+              <i class="fas fa-lock text-[10px]"></i> Défini
+            </span>
+            {% else %}
+            <span class="text-xs text-gray-400 dark:text-gray-500">Aucun</span>
+            {% endif %}
+          </td>
+          <td class="table-cell text-gray-500 dark:text-gray-400 text-sm whitespace-nowrap">
+            {% if u.last_login %}
+              <i class="fas fa-clock text-xs mr-1"></i>{{ u.last_login | truncate(length=16, end="") }}
+            {% else %}
+              <span class="text-gray-400 dark:text-gray-600">—</span>
+            {% endif %}
+          </td>
+          <td class="table-cell">
+            <div class="flex items-center gap-1">
+              <button
+                hx-get="/settings/users/{{ u.id }}/edit"
+                hx-target="#modal-root"
+                hx-swap="innerHTML"
+                class="w-8 h-8 flex items-center justify-center rounded-full
+                       text-gray-400 dark:text-gray-500
+                       hover:text-primary-600 dark:hover:text-primary-400
+                       hover:bg-primary-50 dark:hover:bg-primary-900/20
+                       transition-colors"
+                title="Modifier">
+                <i class="fas fa-pen text-xs"></i>
+              </button>
+              {% if current_user.is_admin %}
+              <button
+                hx-delete="/settings/users/{{ u.id }}"
+                hx-confirm="Supprimer {{ u.name }} ? Cette action est irréversible."
+                hx-swap="none"
+                class="w-8 h-8 flex items-center justify-center rounded-full
+                       text-red-400 dark:text-red-400
+                       hover:text-red-600 dark:hover:text-red-500
+                       hover:bg-red-50 dark:hover:bg-red-900/20
+                       transition-colors"
+                title="Supprimer">
+                <i class="fas fa-trash-can text-xs"></i>
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>

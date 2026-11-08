@@ -1,0 +1,30 @@
+{#
+  Rendered alone by GET /imported-files/:id/reparse into #modal-root.
+  Only the card; see file_delete.html for how closing and the result toast work.
+#}
+<div class="modal-sheet card max-w-lg w-full">
+  <h2 class="text-lg font-semibold mb-2">
+    <i class="fas fa-rotate text-indigo-500 mr-2"></i>Réanalyser le fichier
+  </h2>
+  <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">
+    <i class="fas fa-file-pdf text-red-400 mr-1"></i>
+    <span class="font-medium text-gray-900 dark:text-white">{{ file.filename }}</span>
+  </p>
+  <p class="text-sm text-gray-600 dark:text-gray-300 mb-5 mt-3">
+    Le fichier sera réanalysé et les transactions manquantes ou supprimées par erreur seront
+    ajoutées automatiquement. Les transactions existantes ne seront pas modifiées.
+  </p>
+  <div class="flex flex-col gap-2">
+    <button hx-post="/imported-files/{{ file.id }}/reparse"
+            hx-swap="none"
+            hx-disabled-elt="this"
+            @htmx:after-request="close()"
+            class="btn-primary w-full justify-center">
+      <i class="fas fa-rotate mr-2"></i> Oui — rechercher les transactions manquantes
+    </button>
+    <button type="button" @click="close()"
+            class="btn-secondary w-full justify-center mt-1">
+      Annuler
+    </button>
+  </div>
+</div>

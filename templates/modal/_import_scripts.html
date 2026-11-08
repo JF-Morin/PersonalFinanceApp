@@ -1,24 +1,16 @@
 {#
-  Single IIFE: all import-modal code shares its closure (modal, queue,
-  element refs, …). The state/element refs must stay above the code that
-  uses them at load time.
+  Single IIFE, run each time the modal is swapped in (fresh queue every time).
+  All import code shares its closure (queue, element refs, …); the state/element
+  refs must stay above the code that uses them at load time.
 #}
 <script>
 (function () {
-var modal   = document.getElementById('import-modal');
-var btnOpen = document.getElementById('btn-import');
-var btnClose = document.getElementById('im-close');
-var anyImported = false;
-
-function openModal()  { modal.style.display = 'flex'; }
-function closeModal() {
-  modal.style.display = 'none';
-  if (anyImported) window.location.reload();
+// After each import/reparse, the files and transactions tables re-fetch themselves
+// (they listen for these events, like the HX-Trigger ones sent by the server).
+function notifyChanged() {
+  document.body.dispatchEvent(new CustomEvent('files-changed', { bubbles: true }));
+  document.body.dispatchEvent(new CustomEvent('transactions-changed', { bubbles: true }));
 }
-
-btnOpen.addEventListener('click', openModal);
-btnClose.addEventListener('click', closeModal);
-modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
 
 var queue  = [];
 var nextId = 0;
@@ -193,7 +185,7 @@ async function analyzeOne(item) {
     });
     var importData = await importRes.json();
     if (importData.ok) {
-      anyImported = true;
+      notifyChanged();
       removeItem(item.id);
       addSummaryEntry(data, item.file.name, false);
     } else {
@@ -210,7 +202,7 @@ async function doReparse(item, fileId) {
     var r    = await fetch('/imported-files/' + fileId + '/reparse', { method: 'POST' });
     var data = await r.json();
     if (data.ok) {
-      anyImported = true;
+      notifyChanged();
       item._info = data.added > 0
         ? data.added + ' transaction(s) ajoutée(s), ' + data.skipped + ' déjà présente(s)'
         : 'Aucune transaction manquante — déjà à jour';

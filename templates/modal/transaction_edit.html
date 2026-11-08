@@ -1,103 +1,75 @@
-<div id="edit-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px)"
-     class="flex items-center justify-center p-4">
-  <div class="modal-sheet card max-w-3xl w-full">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-semibold">Modifier la transaction</h2>
-      <button type="button" id="edit-close"
-              class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-700 border-none bg-transparent cursor-pointer">
-        <i class="fas fa-xmark"></i>
-      </button>
+{#
+  Rendered alone by GET /transactions/:id/edit into #modal-root.
+  On save the server answers with HX-Trigger {"toast", "close-modal",
+  "transactions-changed"} (the whole table re-fetches itself), or an error swapped
+  into #edit-transaction-error.
+#}
+<div class="modal-sheet card max-w-xl w-full">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-semibold">Modifier la transaction</h2>
+    <button type="button" @click="close()"
+            class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-700 border-none bg-transparent cursor-pointer">
+      <i class="fas fa-xmark"></i>
+    </button>
+  </div>
+
+  <form class="grid grid-cols-2 gap-3"
+        hx-post="/transactions/{{ t.id }}/update"
+        hx-swap="none"
+        hx-disabled-elt="find button[type=submit]">
+    <div>
+      <label class="label">Date</label>
+      <input type="date" name="date" value="{{ t.date }}" class="input w-full">
+    </div>
+    <div class="col-span-2">
+      <label class="label">Opération</label>
+      <input type="text" name="operation" value="{{ t.operation }}" class="input w-full">
+    </div>
+    <div>
+      <label class="label">Montant</label>
+      <input type="number" name="amount" value="{{ edit_amount }}" step="0.01" class="input w-full">
+    </div>
+    <div>
+      <label class="label">Devise</label>
+      <select name="currency_id" class="input w-full">
+        {% for c in currencies %}
+        <option value="{{ c.id }}" {% if c.id == edit_currency_id %}selected{% endif %}>{{ c.name }} ({{ c.symbol }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="label">Catégorie</label>
+      <select name="category_id" class="input w-full">
+        <option value="">—</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {% if t.category_id and c.id == t.category_id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-span-2">
+      <label class="label">Notes</label>
+      <input type="text" name="notes" value="{{ t.notes | default(value='') }}" class="input w-full">
     </div>
 
-    <form id="edit-form"
-          class="grid grid-cols-2 gap-3"
-          hx-swap="outerHTML">
-      <div>
-        <label class="label">Date</label>
-        <input type="date" name="date" id="edit-date" class="input w-full">
-      </div>
-      <div class="col-span-2">
-        <label class="label">Opération</label>
-        <input type="text" name="operation" id="edit-operation" class="input w-full">
-      </div>
-      <div>
-        <label class="label">Montant</label>
-        <input type="number" name="amount" id="edit-amount" step="0.01" class="input w-full">
-      </div>
-      <div>
-        <label class="label">Devise</label>
-        <select name="currency_id" id="edit-currency" class="input w-full">
-          {% for c in currencies | default(value=[]) %}
-          <option value="{{ c.id }}">{{ c.name }} ({{ c.symbol }})</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label class="label">Catégorie</label>
-        <select name="category_id" id="edit-category" class="input w-full">
-          <option value="">—</option>
-          {% for c in categories | default(value=[]) %}
-          <option value="{{ c.id }}">{{ c.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-span-2">
-        <label class="label">Notes</label>
-        <input type="text" name="notes" id="edit-notes" class="input w-full">
-      </div>
+    <div class="col-span-2">
+      {% include "modal/_shares_field.html" %}
+    </div>
 
-      <div class="col-span-2">
-        {% set share_prefix = "edit" %}
-        {% include "modal/_shares_field.html" %}
-      </div>
-
-      <div id="edit-server-error" class="col-span-2 text-sm text-red-500 rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2" style="display:none"></div>
-      <div id="edit-save-status" class="col-span-2 text-sm h-5" style="color:#9ca3af"></div>
-      <div class="col-span-2 flex gap-3 pt-1">
-        <button type="button" id="edit-cancel-btn"
-                class="flex-1 py-2.5 rounded-lg text-sm font-semibold
-                       bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600
-                       text-gray-700 dark:text-gray-200 border-none cursor-pointer transition-colors">
-          Annuler
-        </button>
-        <button type="submit" id="edit-save-btn"
-                class="flex-1 py-2.5 rounded-lg text-sm font-semibold
-                       bg-indigo-600 hover:bg-indigo-700 text-white
-                       border-none cursor-pointer transition-colors shadow-sm">
-          <i class="fas fa-check mr-1"></i> Enregistrer
-        </button>
-      </div>
-    </form>
-  </div>
+    <div id="edit-transaction-error"
+         class="col-span-2 empty:hidden text-sm text-red-500 rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2"></div>
+    <div class="col-span-2 flex gap-3 pt-1">
+      <button type="button" @click="close()"
+              class="flex-1 py-2.5 rounded-lg text-sm font-semibold
+                     bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600
+                     text-gray-700 dark:text-gray-200 border-none cursor-pointer transition-colors">
+        Annuler
+      </button>
+      <button type="submit"
+              class="flex-1 py-2.5 rounded-lg text-sm font-semibold
+                     bg-indigo-600 hover:bg-indigo-700 text-white
+                     border-none cursor-pointer transition-colors shadow-sm">
+        <i class="fas fa-check mr-1"></i> Enregistrer
+      </button>
+    </div>
+  </form>
 </div>
-
-<script>
-document.getElementById('edit-form').addEventListener('htmx:beforeRequest', function(e) {
-  var total = 0;
-  document.querySelectorAll('#edit-shares-list .share-inline-input').forEach(function(inp) {
-    total += parseFloat(inp.value) || 0;
-  });
-  if (total > 100.001) {
-    e.preventDefault();
-    var errEl = document.getElementById('edit-share-error');
-    errEl.textContent = 'La somme des parts ne peut pas dépasser 100 %.';
-    errEl.style.display = '';
-  }
-});
-
-document.getElementById('edit-form').addEventListener('htmx:afterRequest', function(e) {
-  if (e.detail.successful) {
-    document.getElementById('edit-modal').style.display = 'none';
-    window.showTransactionToast && showTransactionToast('Transaction enregistrée.');
-    window.syncPendingAfterSave && syncPendingAfterSave();
-  } else {
-    var errEl = document.getElementById('edit-server-error');
-    errEl.textContent = e.detail.xhr.responseText || 'Erreur serveur.';
-    errEl.style.display = '';
-  }
-});
-
-document.getElementById('edit-form').addEventListener('htmx:afterSettle', function() {
-  window.rebuildRows && rebuildRows();
-});
-</script>

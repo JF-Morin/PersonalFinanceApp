@@ -1,8 +1,4 @@
 <tr id="transaction-row-{{ t.id }}"
-    data-date="{{ t.date }}"
-    data-op="{{ t.operation }}"
-    data-cat="{{ t.category_id | default(value='') }}"
-    data-amount="{{ t.amount }}"
     class="hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
   <td class="table-cell text-center" title="{% if t.is_manual %}Entrée manuelle{% else %}Importé PDF{% endif %}">
     {% if t.is_manual %}
@@ -43,33 +39,16 @@
   <td class="table-cell">
     {% if t.owner_id == current_user_id %}
     <div class="flex items-center gap-1 justify-end">
-      <button class="btn-edit-transaction w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-gray-400 dark:text-slate-400"
-              data-id="{{ t.id }}"
-              data-date="{{ t.date }}"
-              data-operation="{{ t.operation }}"
-              data-amount="{{ t.amount }}"
-              data-currency-id="{{ t.currency_id }}"
-              data-category-id="{{ t.category_id | default(value='') }}"
-              data-shares="{{ t.shares | json_encode }}"
-              data-notes="{{ t.notes | default(value='') }}"
-              data-foreign-amount="{{ t.foreign_currency_amount | default(value='') }}"
-              data-foreign-currency-id="{{ t.foreign_currency_id | default(value='') }}"
-              title="Modifier"
-              onmouseenter="this.style.color='#2563eb';this.style.background='rgba(37,99,235,0.08)'"
-              onmouseleave="this.style.color='';this.style.background=''">
+      <button class="row-action w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent
+                     text-gray-400 dark:text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+              hx-get="/transactions/{{ t.id }}/edit" hx-target="#modal-root" hx-swap="innerHTML"
+              title="Modifier">
         <i class="fas fa-pen text-xs"></i>
       </button>
-      <button class="btn-delete-transaction w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400 dark:text-red-400"
-              data-id="{{ t.id }}"
-              data-operation="{{ t.operation }}"
-              data-date="{{ t.date }}"
-              data-amount="{{ t.amount }}"
-              data-currency="{{ t.currency_symbol }}"
-              data-category="{{ t.category_name | default(value='') }}"
-              data-owner="{{ t.owner_name }}"
-              title="Supprimer"
-              onmouseenter="this.style.color='#dc2626';this.style.background='rgba(239,68,68,0.12)'"
-              onmouseleave="this.style.color='';this.style.background=''">
+      <button class="row-action w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent
+                     text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              hx-get="/transactions/{{ t.id }}/delete" hx-target="#modal-root" hx-swap="innerHTML"
+              title="Supprimer">
         <i class="fas fa-trash-can text-xs"></i>
       </button>
     </div>

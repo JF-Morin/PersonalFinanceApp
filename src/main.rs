@@ -2,6 +2,8 @@ use axum::{
     routing::{delete, get, post},
     Router,
 };
+use axum::extract::FromRef;
+use axum_extra::extract::cookie::Key;
 use std::sync::Arc;
 use tera::Tera;
 use tower_http::{
@@ -11,6 +13,7 @@ use tower_http::{
 use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod backup;
 mod config;
 mod currency;
 mod db;
@@ -37,6 +40,16 @@ pub struct AppState {
     pub tera: Arc<Tera>,
     /// Broadcast channel used to push SSE events to all connected browsers.
     pub events: Arc<sse::EventBus>,
+    /// Signs the `user_id` session cookie (derived from COOKIE_SECRET), so a cookie
+    /// edited or forged in the browser is rejected as "not logged in".
+    pub cookie_key: Key,
+}
+
+/// Lets the `SignedCookieJar` extractor find the signing key in the app state.
+impl FromRef<AppState> for Key {
+    fn from_ref(state: &AppState) -> Key {
+        state.cookie_key.clone()
+    }
 }
 
 #[tokio::main]
@@ -87,6 +100,8 @@ async fn main() -> anyhow::Result<()> {
     // ── Database ───────────────────────────────────────────────────────────────
     let db = db::create_pool(&config.database_url).await?;
     // Embedded migrations (from `migrations/`) are run automatically at startup.
+    // Back up before migrations, so an update can be rolled back to the schema it started from.
+    backup::start(&db, &config).await;
     db::run_migrations(&db).await?;
 
     // ── Templates ─────────────────────────────────────────────────────────────
@@ -107,12 +122,15 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config.clone()),
         tera: Arc::new(tera),
         events: Arc::new(sse::EventBus::new()),
+        // Key needs 64 bytes; SHA-512 stretches the (≥ 32-byte) secret to exactly that.
+        cookie_key: Key::from(&<sha2::Sha512 as sha2::Digest>::digest(config.cookie_secret.as_bytes())),
     };
 
     // ── Router ─────────────────────────────────────────────────────────────────
     let app = Router::new()
         // ── Auth ──────────────────────────────────────────────────────────────
         .route("/login",  get(handlers::auth::get_login).post(handlers::auth::post_login))
+        .route("/login/users/:id", get(handlers::auth::get_login_modal))
         .route("/logout", post(handlers::auth::post_logout))
         // ── Home page (balances, chart, stats) ────────────────────────────────
         .route("/",                        get(handlers::home::get_home))
@@ -122,22 +140,30 @@ async fn main() -> anyhow::Result<()> {
         // ── Settings ──────────────────────────────────────────────────────────
         .route("/settings",                get(handlers::settings::get_settings)
                                           .post(handlers::settings::post_settings))
-        .route("/settings/users",          post(handlers::settings::post_new_user))
+        .route("/settings/users",          get(handlers::settings::get_users_table)
+                                          .post(handlers::settings::post_new_user))
         .route("/settings/users/:id",      delete(handlers::settings::delete_user))
-        .route("/settings/users/:id/edit", post(handlers::settings::post_edit_user))
+        .route("/settings/users/:id/edit", get(handlers::settings::get_edit_user_modal)
+                                          .post(handlers::settings::post_edit_user))
         // ── Transactions ──────────────────────────────────────────────────────
         .route("/transactions",               get(handlers::transactions::get_transactions))
-        .route("/transactions/pending-json",  get(handlers::transactions::get_pending_json))
+        .route("/transactions/export.csv",    get(handlers::transactions::get_export_csv))
+        .route("/transactions/new",           get(handlers::transactions::get_manual_modal))
+        .route("/transactions/manual",        post(handlers::transactions::post_manual_transaction))
         .route("/transactions/pending-badge", get(handlers::transactions::get_pending_badge))
-        .route("/transactions/:id/update",   post(handlers::transactions::post_update_transaction))
-        .route("/transactions/:id/delete", post(handlers::transactions::post_delete_transaction))
-        .route("/transactions/:id/shares", post(handlers::transactions::post_transaction_share))
-        .route("/transactions/:id/shares/:user_id", delete(handlers::transactions::delete_transaction_share))
-        .route("/transactions/manual",     post(handlers::transactions::post_manual_transaction))
+        .route("/transactions/pending",       get(handlers::transactions::get_carousel))
+        .route("/transactions/pending/:id",   post(handlers::transactions::post_carousel))
+        .route("/transactions/:id/edit",      get(handlers::transactions::get_edit_modal))
+        .route("/transactions/:id/update",    post(handlers::transactions::post_update_transaction))
+        .route("/transactions/:id/delete",    get(handlers::transactions::get_delete_modal)
+                                             .post(handlers::transactions::post_delete_transaction))
         // ── Imports ───────────────────────────────────────────────────────────
         .route("/imported-files",          get(handlers::imports::get_imported_files))
-        .route("/imported-files/:id/delete",  post(handlers::imports::post_delete_imported_file))
-        .route("/imported-files/:id/reparse", post(handlers::imports::post_reparse_imported_file))
+        .route("/imported-files/:id/delete",  get(handlers::imports::get_delete_file_modal)
+                                             .post(handlers::imports::post_delete_imported_file))
+        .route("/imported-files/:id/reparse", get(handlers::imports::get_reparse_file_modal)
+                                             .post(handlers::imports::post_reparse_imported_file))
+        .route("/upload",                  get(handlers::imports::get_import_modal))
         .route("/upload/analyze",          post(handlers::imports::post_analyze))
         .route("/upload/confirm",          post(handlers::imports::post_confirm_import))
         // ── Misc ──────────────────────────────────────────────────────────────
@@ -148,6 +174,8 @@ async fn main() -> anyhow::Result<()> {
         .nest_service("/static", ServeDir::new("static"))
         // Catch-all: redirect unknown routes to the 404 page.
         .fallback(handlers::handler_404)
+        // Redirects answering HTMX requests become HX-Redirect (see handlers::htmx_redirects).
+        .layer(axum::middleware::from_fn(handlers::htmx_redirects))
         // HTTP request/response tracing — logs method, path, status, latency
         .layer(
             TraceLayer::new_for_http()

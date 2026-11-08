@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installed to .git/hooks/pre-push by scripts/install-hooks.sh
 # Runs on every `git push`: checks that no sensitive files are included.
-# Database backup happens on the server side via docker-entrypoint.sh.
+# Database backups are made by the app itself on the server (src/backup.rs: at startup and every BACKUP_INTERVAL_HOURS).
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"

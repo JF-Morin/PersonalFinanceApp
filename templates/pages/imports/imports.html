@@ -5,99 +5,12 @@
 <div class="page-header">
   <h1>Fichiers importés</h1>
   <div class="page-header-actions">
-    <button id="btn-import" class="btn-primary" title="Importer">
+    <button class="btn-primary" title="Importer"
+            hx-get="/upload" hx-target="#modal-root" hx-swap="innerHTML">
       <i class="fas fa-file-upload mr-1"></i> <span class="btn-label">Importer</span>
     </button>
   </div>
 </div>
 
-{% include "modal/modal.html" %}
-<div id="toast"
-     style="display:none; position:fixed; bottom:1.5rem; right:1.5rem; z-index:1000"
-     class="text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2">
-  <i id="toast-icon" class="fas fa-check-circle"></i>
-  <span id="toast-msg"></span>
-</div>
-
-<div class="card overflow-hidden p-0">
-  <div id="imports-table-wrapper" class="overflow-auto bg-gray-100 dark:bg-slate-900/60">
-    <table class="w-full bg-white dark:bg-slate-800">
-      <thead id="files-thead" class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600 sticky top-0 z-10">
-        <tr>
-          <th class="table-header" style="min-width:16rem">
-            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('filename', this)">Fichier <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
-          </th>
-          <th class="table-header" style="min-width:10rem">
-            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('bank', this)">Banque <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
-          </th>
-          <th class="table-header" style="min-width:12rem">
-            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('date', this)">Importé le <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
-          </th>
-          <th class="table-header" style="min-width:6rem">
-            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('transactionCount', this)">Transactions <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
-          </th>
-          <th class="table-header" style="min-width:10rem">
-            <span class="flex items-center gap-1 cursor-pointer select-none" onclick="impSort('importer', this)">Importé par <i class="fas fa-sort text-gray-400 text-xs sort-icon"></i></span>
-          </th>
-          <th class="table-header" style="min-width:7rem"></th>
-        </tr>
-      </thead>
-      <tbody id="files-tbody" class="divide-y divide-gray-100 dark:divide-slate-700">
-        {% if files %}
-        {% for f in files %}
-        <tr id="file-row-{{ f.id }}"
-            data-filename="{{ f.filename }}"
-            data-bank="{{ f.bank_name }}"
-            data-date="{{ f.imported_at }}"
-            data-transaction-count="{{ f.row_count }}"
-            data-importer="{{ f.importer_name }}"
-            class="hover:bg-gray-50 dark:hover:bg-slate-700">
-          <td class="table-cell">
-            <i class="fas fa-file-pdf text-red-400 mr-2"></i>{{ f.filename }}
-          </td>
-          <td class="table-cell text-gray-500">{{ f.bank_name }}</td>
-          <td class="table-cell text-gray-500 whitespace-nowrap">{{ f.imported_at }}</td>
-          <td class="table-cell">{{ f.row_count }}</td>
-          <td class="table-cell text-gray-500">{{ f.importer_name }}</td>
-          <td class="table-cell text-right">
-            <div class="flex items-center gap-1 justify-end">
-              {% if f.importer_id == current_user_id %}
-              <button
-                class="reparse-btn w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-indigo-400 dark:text-indigo-400"
-                data-id="{{ f.id }}"
-                data-filename="{{ f.filename }}"
-                title="Réanalyser — rechercher les transactions manquantes"
-                onmouseenter="this.style.color='#4f46e5';this.style.background='rgba(79,70,229,0.1)'"
-                onmouseleave="this.style.color='';this.style.background=''">
-                <i class="fas fa-rotate text-xs"></i>
-              </button>
-              {% endif %}
-              <button
-                class="delete-btn w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent text-red-400 dark:text-red-400"
-                data-id="{{ f.id }}"
-                data-filename="{{ f.filename }}"
-                data-row-count="{{ f.row_count }}"
-                title="Supprimer ce fichier"
-                onmouseenter="this.style.color='#dc2626';this.style.background='rgba(239,68,68,0.12)'"
-                onmouseleave="this.style.color='';this.style.background=''">
-                <i class="fas fa-trash-can text-xs"></i>
-              </button>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-        {% else %}
-        <tr id="empty-row">
-          <td colspan="6" class="text-center py-12 text-gray-400">
-            <i class="fas fa-inbox text-4xl mb-3 block"></i>
-            Aucun fichier importé.
-          </td>
-        </tr>
-        {% endif %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-{% include "pages/imports/_scripts.html" %}
+{% include "pages/imports/_table.html" %}
 {% endblock %}

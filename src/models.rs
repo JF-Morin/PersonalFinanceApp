@@ -16,6 +16,8 @@ pub struct User {
     pub bank_id: Option<i64>,
     pub password_hash: Option<String>,
     pub last_login: Option<String>,
+    /// The admin (first user of the app) is the only one who can delete users.
+    pub is_admin: bool,
 }
 
 impl User {

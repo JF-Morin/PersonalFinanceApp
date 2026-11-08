@@ -1,10 +1,12 @@
+{# Open/closed state is `sidebarOpen` on <body> (layout/base.html); only used on mobile. #}
 <aside id="sidebar"
+       :class="{ 'sidebar-open': sidebarOpen }"
        class="w-72 flex-shrink-0 bg-white dark:bg-slate-800
               border-r border-gray-200 dark:border-slate-700 flex flex-col"
        style="box-shadow: 1px 0 4px rgba(0,0,0,0.06);">
 
   <!-- Mobile close button -->
-  <button id="btn-sidebar-close" aria-label="Fermer le menu">
+  <button id="btn-sidebar-close" aria-label="Fermer le menu" @click="sidebarOpen = false">
     <i class="fas fa-xmark"></i>
   </button>
 
@@ -36,11 +38,12 @@
 
   <!-- Navigation links -->
   <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto"
-       hx-boost="true">
-    <a href="/"               class="nav-link"><i class="fas fa-home"></i> Accueil</a>
-    <a href="/transactions"   class="nav-link"><i class="fas fa-list"></i> Transactions</a>
-    <a href="/imported-files" class="nav-link"><i class="fas fa-file-pdf"></i> Imports</a>
-    <a href="/settings"       class="nav-link"><i class="fas fa-cog"></i> Paramètres</a>
+       hx-boost="true"
+       @click="if ($event.target.closest('a')) sidebarOpen = false">
+    <a href="/" class="nav-link{% if active_nav == "/" %} active{% endif %}"><i class="fas fa-home"></i> Accueil</a>
+    <a href="/transactions" class="nav-link{% if active_nav == "/transactions" %} active{% endif %}"><i class="fas fa-list"></i> Transactions</a>
+    <a href="/imported-files" class="nav-link{% if active_nav == "/imported-files" %} active{% endif %}"><i class="fas fa-file-pdf"></i> Imports</a>
+    <a href="/settings" class="nav-link{% if active_nav == "/settings" %} active{% endif %}"><i class="fas fa-cog"></i> Paramètres</a>
   </nav>
 
   <!-- Logout -->

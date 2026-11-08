@@ -20,7 +20,7 @@ use axum::{
     response::{Html, IntoResponse, Json},
     Form,
 };
-use axum_extra::extract::CookieJar;
+use axum_extra::extract::cookie::SignedCookieJar;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -32,7 +32,7 @@ use crate::{
     parsers::{all_parsers, detect_and_parse, detect_and_parse_positioned, lopdf_text},
     AppState,
 };
-use super::{base_context, is_htmx};
+use super::{base_context, is_htmx, is_htmx_boost, toast_response};
 
 /// Enriched file row joined with bank name and importer name for the imports table.
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -47,18 +47,62 @@ struct ImportedFileView {
     importer_id: i64,
 }
 
-/// GET /imported-files — render the imported files list page.
-/// The synthetic "manual" row is excluded from the table (it's an implementation detail).
-pub async fn get_imported_files(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> AppResult<Html<String>> {
-    let mut ctx = base_context(&jar, &state.db).await?;
-    let current_user_id = super::get_user_id(&jar)?;
+/// `?sort=<column>&dir=asc|desc` on the imported files list.
+#[derive(Deserialize, Default)]
+pub struct FilesSortParams {
+    sort: Option<String>,
+    dir: Option<String>,
+}
 
-    let files = sqlx::query_as::<_, ImportedFileView>(
+/// One sortable column header, as the `_table.html` template needs it.
+#[derive(Serialize)]
+struct SortColumn {
+    key: &'static str,
+    label: &'static str,
+    min_width: &'static str,
+    /// "asc" / "desc" when the table is sorted by this column, "" otherwise.
+    dir: &'static str,
+    /// Direction a click on this header switches to.
+    next_dir: &'static str,
+}
+
+/// (key, header label, min width, ORDER BY expression)
+const FILE_COLUMNS: [(&str, &str, &str, &str); 5] = [
+    ("filename",     "Fichier",      "16rem", "f.filename COLLATE NOCASE"),
+    ("bank",         "Banque",       "10rem", "b.name COLLATE NOCASE"),
+    ("date",         "Importé le",   "12rem", "f.imported_at"),
+    ("transactions", "Transactions", "6rem",  "row_count"),
+    ("importer",     "Importé par",  "10rem", "importer_name COLLATE NOCASE"),
+];
+
+/// Render the files table (`pages/imports/_table.html`) into `ctx`'s variables.
+/// Unknown sort keys fall back to the default: newest import first.
+async fn insert_files_table(
+    ctx: &mut tera::Context,
+    db: &crate::db::DbPool,
+    params: &FilesSortParams,
+    current_user_id: i64,
+) -> AppResult<()> {
+    let (sort, order_by) = FILE_COLUMNS
+        .iter()
+        .find(|c| Some(c.0) == params.sort.as_deref())
+        .map(|c| (c.0, c.3))
+        .unwrap_or(("date", "f.imported_at"));
+    let dir = match params.dir.as_deref() {
+        Some("asc") => "asc",
+        Some("desc") => "desc",
+        _ if sort == "date" => "desc",
+        _ => "asc",
+    };
+
+    // `order_by` and `dir` come from the whitelists above, never from user input.
+    let sql = format!(
         r#"
-        SELECT f.id, f.filename, f.imported_at, f.row_count, f.source_file,
+        SELECT f.id, f.filename, f.imported_at,
+               -- Current count: `f.row_count` is frozen at import time and goes stale when
+               -- single transactions are deleted or re-added by a reparse.
+               (SELECT COUNT(*) FROM transactions t WHERE t.from_file_id = f.id) AS row_count,
+               f.source_file,
                b.name AS bank_name,
                u.name || COALESCE(' ' || u.last_name, '') AS importer_name,
                f.importer_id
@@ -66,21 +110,120 @@ pub async fn get_imported_files(
         JOIN banks b ON f.bank_id = b.id
         JOIN users u ON f.importer_id = u.id
         WHERE f.filename != 'manual'
-        ORDER BY f.imported_at DESC
+        ORDER BY {order_by} {dir}, f.id DESC
         "#
-    )
-    .fetch_all(&state.db)
-    .await?;
+    );
+    let files = sqlx::query_as::<_, ImportedFileView>(&sql).fetch_all(db).await?;
 
+    let columns: Vec<SortColumn> = FILE_COLUMNS
+        .iter()
+        .map(|&(key, label, min_width, _)| {
+            let active = if key == sort { dir } else { "" };
+            SortColumn {
+                key,
+                label,
+                min_width,
+                dir: active,
+                next_dir: if active == "asc" { "desc" } else { "asc" },
+            }
+        })
+        .collect();
+
+    ctx.insert("files", &files);
+    ctx.insert("columns", &columns);
+    ctx.insert("sort", sort);
+    ctx.insert("dir", dir);
+    ctx.insert("current_user_id", &current_user_id);
+    Ok(())
+}
+
+/// GET /imported-files — render the imported files list page.
+/// HTMX requests (sorting, SSE refresh) get only the table fragment.
+/// The synthetic "manual" row is excluded from the table (it's an implementation detail).
+pub async fn get_imported_files(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    headers: HeaderMap,
+    Query(params): Query<FilesSortParams>,
+) -> AppResult<Html<String>> {
+    let current_user_id = super::get_user_id(&jar)?;
+
+    if is_htmx(&headers) && !is_htmx_boost(&headers) {
+        let mut ctx = tera::Context::new();
+        insert_files_table(&mut ctx, &state.db, &params, current_user_id).await?;
+        let html = state.tera.render("pages/imports/_table.html", &ctx)?;
+        return Ok(Html(html));
+    }
+
+    let mut ctx = base_context(&jar, &state.db, "/imported-files").await?;
+    insert_files_table(&mut ctx, &state.db, &params, current_user_id).await?;
+    let html = state.tera.render("pages/imports/imports.html", &ctx)?;
+    Ok(Html(html))
+}
+
+/// GET /upload — the import modal (loaded into `#modal-root` by the "Importer" buttons).
+pub async fn get_import_modal(State(state): State<AppState>, jar: SignedCookieJar) -> AppResult<Html<String>> {
+    super::get_user_id(&jar)?;
     let banks = sqlx::query_as::<_, Bank>("SELECT * FROM banks ORDER BY name")
         .fetch_all(&state.db)
         .await?;
-
-    ctx.insert("files", &files);
-    ctx.insert("current_user_id", &current_user_id);
+    let mut ctx = tera::Context::new();
     ctx.insert("banks", &banks);
-    let html = state.tera.render("pages/imports/imports.html", &ctx)?;
-    Ok(Html(html))
+    Ok(Html(state.tera.render("modal/import.html", &ctx)?))
+}
+
+/// File summary shown in the delete / reparse confirmation modals.
+#[derive(Serialize, sqlx::FromRow)]
+struct FileModalView {
+    id: i64,
+    filename: String,
+    row_count: i64,
+    importer_id: i64,
+}
+
+async fn render_file_modal(
+    state: &AppState,
+    jar: &SignedCookieJar,
+    file_id: i64,
+    template: &str,
+) -> AppResult<Html<String>> {
+    let user_id = super::get_user_id(jar)?;
+    let file = sqlx::query_as::<_, FileModalView>(
+        // Count the file's transactions now — `imported_files.row_count` is the count at
+        // import time and changes when single transactions are deleted or re-added.
+        "SELECT id, filename, importer_id, \
+                (SELECT COUNT(*) FROM transactions WHERE from_file_id = f.id) AS row_count \
+         FROM imported_files f WHERE id = ?",
+    )
+    .bind(file_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Other("Fichier introuvable".into()))?;
+    // Delete and reparse are reserved to the user who imported the file.
+    if file.importer_id != user_id {
+        return Err(AppError::Other("Vous n'êtes pas autorisé à modifier ce fichier.".into()));
+    }
+    let mut ctx = tera::Context::new();
+    ctx.insert("file", &file);
+    Ok(Html(state.tera.render(template, &ctx)?))
+}
+
+/// GET /imported-files/:id/delete — the delete confirmation modal (loaded into `#modal-root`).
+pub async fn get_delete_file_modal(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Path(file_id): Path<i64>,
+) -> AppResult<Html<String>> {
+    render_file_modal(&state, &jar, file_id, "modal/file_delete.html").await
+}
+
+/// GET /imported-files/:id/reparse — the reparse confirmation modal (loaded into `#modal-root`).
+pub async fn get_reparse_file_modal(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Path(file_id): Path<i64>,
+) -> AppResult<Html<String>> {
+    render_file_modal(&state, &jar, file_id, "modal/file_reparse.html").await
 }
 
 /// Form submitted by the import confirmation modal.
@@ -99,19 +242,19 @@ pub struct ConfirmImportForm {
 /// POST /upload/confirm — persist the analyzed transactions to the DB.
 pub async fn post_confirm_import(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     headers: HeaderMap,
     Form(form): Form<ConfirmImportForm>,
 ) -> impl IntoResponse {
     match confirm_import_inner(state, jar, headers, form).await {
         Ok(resp) => resp,
-        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.user_message() })).into_response(),
     }
 }
 
 async fn confirm_import_inner(
     state: AppState,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     _headers: HeaderMap,
     form: ConfirmImportForm,
 ) -> AppResult<axum::response::Response> {
@@ -159,6 +302,8 @@ async fn confirm_import_inner(
         .parse()
         .unwrap_or(1);
 
+    // One DB transaction: the file row and all its transactions, or nothing.
+    let mut tx = state.db.begin().await?;
     let file_id: i64 = sqlx::query_scalar(
         "INSERT INTO imported_files (filename, bank_id, source_file, row_count, importer_id, content_hash) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
     )
@@ -168,7 +313,7 @@ async fn confirm_import_inner(
     .bind(transactions.len() as i64)
     .bind(user_id)
     .bind(&form.content_hash)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
 
     for transaction in &transactions {
@@ -187,9 +332,10 @@ async fn confirm_import_inner(
         .bind(status_id)
         .bind(file_id)
         .bind(&transaction.parse_note)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
 
     // Notify imports listeners (imports page) and transactions listeners (transactions page,
     // home page) — this operation writes rows to both tables.
@@ -211,18 +357,18 @@ async fn confirm_import_inner(
 /// POST /upload/analyze — receive a PDF, parse it, return a JSON preview (no DB writes).
 pub async fn post_analyze(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     multipart: Multipart,
 ) -> impl IntoResponse {
     match analyze_inner(state, jar, multipart).await {
         Ok(resp) => resp,
-        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.user_message() })).into_response(),
     }
 }
 
 async fn analyze_inner(
     state: AppState,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     mut multipart: Multipart,
 ) -> AppResult<axum::response::Response> {
     let user_id = super::get_user_id(&jar)?;
@@ -422,84 +568,64 @@ fn lopdf_fallback(
 
 // ── Delete imported file ──────────────────────────────────────────────────────
 
-/// Query parameter: `?with_transactions=1` to also delete all linked transactions.
-#[derive(Deserialize)]
-pub struct DeleteFileParams {
-    #[serde(default)]
-    with_transactions: Option<String>,
-}
-
-/// POST /imported-files/:id/delete — delete a file and optionally its transactions.
-/// Returns an `HX-Trigger: showFileToast` header so the imports page can show a toast
-/// without a full reload.
+/// POST /imported-files/:id/delete — delete a file together with its transactions.
+/// Every imported transaction belongs to its file (a transaction is either manual or
+/// from a PDF), so they always go together; a single transaction can still be deleted
+/// on its own and brought back with "Réanalyser".
+/// HTMX callers get a toast plus a `files-changed` event (the table re-fetches itself);
+/// other callers get JSON.
 pub async fn post_delete_imported_file(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     Path(file_id): Path<i64>,
-    Query(params): Query<DeleteFileParams>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    match delete_file_inner(state, jar, file_id, &params, is_htmx(&headers)).await {
+    let htmx = is_htmx(&headers);
+    match delete_file_inner(state, jar, file_id, htmx).await {
         Ok(resp) => resp,
-        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
+        Err(e) if htmx => toast_response(&e.user_message(), false, &["files-changed"]),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.user_message() })).into_response(),
     }
 }
 
 async fn delete_file_inner(
     state: AppState,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     file_id: i64,
-    params: &DeleteFileParams,
     htmx: bool,
 ) -> AppResult<axum::response::Response> {
     let user_id = super::get_user_id(&jar)?;
 
-    let with_transactions = params
-        .with_transactions
-        .as_deref()
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(false);
-
     // Fetch file record
-    let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT filename, source_file FROM imported_files WHERE id = ?",
+    let row: Option<(String, String, i64)> = sqlx::query_as(
+        "SELECT filename, source_file, importer_id FROM imported_files WHERE id = ?",
     )
     .bind(file_id)
     .fetch_optional(&state.db)
     .await?;
 
-    let (filename, source_file) = row.ok_or_else(|| AppError::Other("Fichier introuvable".into()))?;
-
-    let mut transactions_deleted: i64 = 0;
-
-    if with_transactions {
-        transactions_deleted = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM transactions WHERE from_file_id = ?",
-        )
-        .bind(file_id)
-        .fetch_one(&state.db)
-        .await?;
-
-        sqlx::query("DELETE FROM transactions WHERE from_file_id = ?")
-            .bind(file_id)
-            .execute(&state.db)
-            .await?;
-
-        tracing::info!(
-            file_id = %file_id,
-            filename = %filename,
-            transactions_deleted = %transactions_deleted,
-            "Transactions deleted with file"
-        );
+    let (filename, source_file, importer_id) =
+        row.ok_or_else(|| AppError::Other("Fichier introuvable".into()))?;
+    // Only the user who imported a file may delete it (and with it, its transactions).
+    if importer_id != user_id {
+        return Err(AppError::Other("Vous n'êtes pas autorisé à supprimer ce fichier.".into()));
     }
 
-    // Delete the DB record
+    // One DB transaction: the file's transactions (they reference it; their shares
+    // cascade) and the file row go together, or nothing is deleted.
+    let mut tx = state.db.begin().await?;
+    let transactions_deleted = sqlx::query("DELETE FROM transactions WHERE from_file_id = ?")
+        .bind(file_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
     sqlx::query("DELETE FROM imported_files WHERE id = ?")
         .bind(file_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
 
-    // Delete the physical file from storage (best-effort — don't fail if missing)
+    // Only once the DB is committed: delete the physical file (best-effort — don't fail if missing)
     let physical_path = PathBuf::from(&state.config.storage_path).join(&source_file);
     match tokio::fs::remove_file(&physical_path).await {
         Ok(_) => tracing::info!(path = %physical_path.display(), "Physical PDF deleted"),
@@ -518,25 +644,13 @@ async fn delete_file_inner(
     tracing::info!(
         file_id              = %file_id,
         filename             = %filename,
-        with_transactions    = %with_transactions,
         transactions_deleted = %transactions_deleted,
         "Import file deleted"
     );
 
     if htmx {
-        let msg = if with_transactions && transactions_deleted > 0 {
-            format!("Fichier supprimé — {} transaction(s) supprimée(s).", transactions_deleted)
-        } else {
-            "Fichier supprimé.".to_string()
-        };
-        // HX-Trigger fires a custom event on the page; the imports JS listens for
-        // `showFileToast` and displays a toast notification.
-        let trigger = format!(r#"{{"showFileToast":{{"msg":"{}","ok":true}}}}"#, msg);
-        Ok((
-            axum::http::StatusCode::OK,
-            [(axum::http::header::HeaderName::from_static("hx-trigger"), trigger)],
-            "",
-        ).into_response())
+        let msg = format!("Fichier supprimé — {} transaction(s) supprimée(s).", transactions_deleted);
+        Ok(toast_response(&msg, true, &["files-changed"]))
     } else {
         Ok(Json(serde_json::json!({
             "ok": true,
@@ -553,19 +667,21 @@ async fn delete_file_inner(
 /// Existing transactions are compared by (date, operation, amount) to avoid duplicates.
 pub async fn post_reparse_imported_file(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     Path(file_id): Path<i64>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    match reparse_inner(&state, &jar, file_id, is_htmx(&headers)).await {
+    let htmx = is_htmx(&headers);
+    match reparse_inner(&state, &jar, file_id, htmx).await {
         Ok(resp) => resp,
-        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })).into_response(),
+        Err(e) if htmx => toast_response(&e.user_message(), false, &["files-changed"]),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.user_message() })).into_response(),
     }
 }
 
 async fn reparse_inner(
     state: &AppState,
-    jar: &CookieJar,
+    jar: &SignedCookieJar,
     file_id: i64,
     htmx: bool,
 ) -> AppResult<axum::response::Response> {
@@ -616,6 +732,8 @@ async fn reparse_inner(
     let mut added: i64 = 0;
     let mut skipped: i64 = 0;
 
+    // One DB transaction: either every missing transaction is added, or none.
+    let mut tx = state.db.begin().await?;
     for transaction in &new_transactions {
         // Skip if a transaction with the same date, operation, and amount already exists.
         // 0.005 tolerance on amount to handle minor floating-point differences.
@@ -642,11 +760,12 @@ async fn reparse_inner(
         .bind(status_id)
         .bind(file_id)
         .bind(&transaction.parse_note)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
 
         added += 1;
     }
+    tx.commit().await?;
 
     state.events.send(crate::sse::AppEvent { kind: "imports", actor_id: user_id });
     // Reparse inserts new transaction rows — notify the transactions page too.
@@ -667,12 +786,7 @@ async fn reparse_inner(
         } else {
             "Aucune transaction manquante — tout est déjà à jour.".to_string()
         };
-        let trigger = format!(r#"{{"showFileToast":{{"msg":"{}","ok":true}}}}"#, msg);
-        Ok((
-            axum::http::StatusCode::OK,
-            [(axum::http::header::HeaderName::from_static("hx-trigger"), trigger)],
-            "",
-        ).into_response())
+        Ok(toast_response(&msg, true, &["files-changed"]))
     } else {
         Ok(Json(serde_json::json!({
             "ok":      true,

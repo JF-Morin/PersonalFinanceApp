@@ -1,21 +1,23 @@
 /// Authentication handlers — login, logout, and first-login password setup.
 ///
-/// Session management is cookie-based: a plain `user_id=<id>` HTTP-only cookie.
-/// There are no JWT tokens or server-side sessions; the cookie value is trusted as-is
-/// (the cookie is not signed, so this is designed for a trusted home-network deployment).
+/// Session management is cookie-based: a `user_id=<id>` HTTP-only, SameSite=Lax cookie,
+/// signed with a key derived from COOKIE_SECRET (`SignedCookieJar`). There are no server-side
+/// sessions; a cookie that was edited or forged fails the signature check and counts as
+/// "not logged in".
 ///
 /// Password hashing uses Argon2id via the `argon2` crate.  Passwords are never stored
 /// in plaintext — only the hash string is kept in `users.password_hash`.
 ///
-/// Two login flows exist:
-///   • First login (password_hash IS NULL): user must set a password via the "set" modal.
-///   • Returning user (password_hash IS NOT NULL): password is verified against the stored hash.
+/// Every profile needs a password: it's required when the profile is created. A profile
+/// without one (from before passwords were required) can't log in — its password must be
+/// set from the settings page. The only exception is a database where nobody has a
+/// password yet, so the app can't lock everyone out: then the first login sets it.
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::{Html, IntoResponse, Redirect},
     Form,
 };
-use axum_extra::extract::cookie::{Cookie, CookieJar};
+use axum_extra::extract::cookie::{Cookie, SameSite, SignedCookieJar};
 use serde::{Deserialize, Serialize};
 
 use argon2::{
@@ -40,7 +42,7 @@ struct UserLoginView {
     has_password: bool,
 }
 
-/// Query parameters for the login page — used to surface error banners.
+/// Query parameters for the login page — error messages after a redirect (shown as a toast).
 #[derive(Deserialize, Default)]
 pub struct LoginQuery {
     pub error: Option<String>,
@@ -51,7 +53,7 @@ pub struct LoginQuery {
 /// GET /login — show the login page, or redirect to / if already logged in.
 pub async fn get_login(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     Query(query): Query<LoginQuery>,
 ) -> AppResult<impl IntoResponse> {
     // If a cookie is present, verify the user still exists in the DB.
@@ -77,6 +79,14 @@ pub async fn get_login(
 
     let html = render_login_page(&state, &query).await?;
     Ok(html.into_response())
+}
+
+/// True when no profile has a password yet — the only case where logging in to a
+/// password-less profile (and setting its password) is allowed.
+async fn nobody_has_password(db: &crate::db::DbPool) -> AppResult<bool> {
+    Ok(!sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM users WHERE password_hash IS NOT NULL)")
+        .fetch_one(db)
+        .await?)
 }
 
 /// Build and render the login page template with the list of users and banks.
@@ -106,14 +116,56 @@ async fn render_login_page(state: &crate::AppState, query: &LoginQuery) -> AppRe
 
     let mut ctx = tera::Context::new();
     ctx.insert("users", &user_views);
+    ctx.insert("can_set_password", &nobody_has_password(&state.db).await?);
     ctx.insert("banks", &banks);
     ctx.insert("theme", &theme);
     ctx.insert("is_dark", &(theme == "dark"));
-    ctx.insert("login_error", &query.error.is_some());
-    ctx.insert("unauthorized", &query.unauthorized.is_some());
-    ctx.insert("user_error", &query.user_error.as_deref().unwrap_or(""));
+    let flash = if query.error.as_deref() == Some("nopassword") {
+        Some("Ce profil n'a pas de mot de passe : il doit être défini depuis les Paramètres par un utilisateur connecté.")
+    } else if query.error.is_some() {
+        Some("Mot de passe incorrect. Réessayez.")
+    } else if query.user_error.as_deref() == Some("empty") {
+        Some("Le mot de passe est obligatoire.")
+    } else if query.user_error.as_deref() == Some("mismatch") {
+        Some("Les mots de passe ne correspondent pas.")
+    } else if query.user_error.as_deref() == Some("duplicate") {
+        Some("Un profil avec ce prénom existe déjà.")
+    } else if query.unauthorized.is_some() {
+        Some("Accès refusé. Connectez-vous pour accéder à cette page.")
+    } else {
+        None
+    };
+    if let Some(msg) = flash {
+        super::insert_flash(&mut ctx, msg, false);
+    }
 
     Ok(Html(state.tera.render("pages/auth/login.html", &ctx)?))
+}
+
+/// GET /login/users/:id — the password modal for one profile: "verify" when the user
+/// has a password, "set" on first login. Public, like the login page itself.
+pub async fn get_login_modal(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> AppResult<Html<String>> {
+    let u = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Other("Utilisateur introuvable".into()))?;
+    let user = UserLoginView {
+        id: u.id,
+        name: u.name,
+        last_name: u.last_name,
+        has_password: u.password_hash.is_some(),
+    };
+    if !user.has_password && !nobody_has_password(&state.db).await? {
+        return Err(AppError::Other("Ce profil n'a pas de mot de passe.".into()));
+    }
+    let mut ctx = tera::Context::new();
+    ctx.insert("mode", if user.has_password { "verify" } else { "set" });
+    ctx.insert("user", &user);
+    Ok(Html(state.tera.render("modal/login.html", &ctx)?))
 }
 
 #[derive(Deserialize)]
@@ -128,7 +180,7 @@ pub struct LoginForm {
 /// POST /login — handle both the first-login (set password) and returning-user flows.
 pub async fn post_login(
     State(state): State<AppState>,
-    jar: CookieJar,
+    jar: SignedCookieJar,
     Form(form): Form<LoginForm>,
 ) -> AppResult<impl IntoResponse> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
@@ -138,7 +190,11 @@ pub async fn post_login(
         .ok_or_else(|| AppError::Other("Utilisateur introuvable".into()))?;
 
     if user.password_hash.is_none() {
-        // ── First login: user is setting their password for the first time ──────────
+        // ── Password-less profile: only allowed while nobody has a password ─────────
+        if !nobody_has_password(&state.db).await? {
+            tracing::warn!(user_id = %form.user_id, "Login refused: profile has no password");
+            return Ok(Redirect::to("/login?error=nopassword").into_response());
+        }
         let new_pw = form.new_password.as_deref().unwrap_or("");
         if new_pw.is_empty() {
             return Ok(Redirect::to("/login?error=1").into_response());
@@ -176,16 +232,19 @@ pub async fn post_login(
         .await?;
 
     // `http_only` prevents JavaScript from reading the cookie — a small XSS mitigation.
+    // Signed by the SignedCookieJar (see AppState::cookie_key). SameSite=Lax keeps other
+    // websites from sending requests with it (CSRF).
     let cookie = Cookie::build(("user_id", form.user_id.to_string()))
         .path("/")
         .http_only(true)
+        .same_site(SameSite::Lax)
         .build();
     tracing::info!(user_id = %form.user_id, "User logged in");
     Ok((jar.add(cookie), Redirect::to("/")).into_response())
 }
 
 /// POST /logout — clear the session cookie and redirect to login.
-pub async fn post_logout(jar: CookieJar) -> impl IntoResponse {
+pub async fn post_logout(jar: SignedCookieJar) -> impl IntoResponse {
     let jar = jar.remove(Cookie::build(("user_id", "")).path("/").build());
     (jar, Redirect::to("/login"))
 }

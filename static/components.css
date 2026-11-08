@@ -264,3 +264,6 @@ select.input {
 @media (max-width: 1023px) {
   #btn-sidebar-close { display: flex; }
 }
+
+/* ── Refresh buttons: spin the icon while the HTMX request runs ── */
+.refresh-btn.htmx-request i { animation: fa-spin 1s linear infinite; }

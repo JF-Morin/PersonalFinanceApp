@@ -1,10 +1,28 @@
+{#
+  Rendered alone by GET /home/chart-part. Alpine runs init() whenever this canvas is
+  added (page load or HTMX swap) and destroy() when it's swapped out, so no page
+  script is needed. Labels/totals are json_encode'd, then HTML-escaped by Tera,
+  which keeps them valid inside the double-quoted attribute.
+#}
 {% if category_labels %}
 <div class="max-w-md mx-auto">
-  <canvas id="categoryChart"></canvas>
+  <canvas x-data="{
+            init() {
+              new Chart(this.$el, {
+                type: 'doughnut',
+                data: {
+                  labels: {{ category_labels | json_encode() }},
+                  datasets: [{
+                    data: {{ category_totals | json_encode() }},
+                    backgroundColor: ['#4f46e5','#7c3aed','#db2777','#ea580c','#ca8a04','#16a34a','#0891b2','#6366f1','#ec4899','#f59e0b']
+                  }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+              })
+            },
+            destroy() { Chart.getChart(this.$el)?.destroy() }
+          }"></canvas>
 </div>
 {% else %}
 <p class="text-center text-gray-400 py-8 text-sm">Aucune donnée. Importez des relevés pour voir les statistiques.</p>
 {% endif %}
-<script type="application/json" id="chart-data-json">
-{"labels": {{ category_labels | json_encode() | safe }}, "totals": {{ category_totals | json_encode() | safe }}}
-</script>
