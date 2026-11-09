@@ -1,0 +1,71 @@
+{#
+  Filter bar of a filterable table (transactions, imported files): the left side of
+  the toolbar above the column headers. Context: `filter_bar` (handlers/filters.rs).
+  - "Filtres (n)" opens the page's filters modal, sending the search form (search,
+    filters, sort) so the modal opens pre-filled.
+  - The sort chip (card mode only, `.sort-chip`): opens the modal / flips the order.
+  - One chip per active filter; its ✕ reloads the table without it. "Tout effacer"
+    when several are active.
+  - Hidden inputs carrying the filters and the sort, so the search box submits them.
+  Every request that reloads the table is in one `hx-sync` group (`fb.sync`, the table
+  card): user actions `replace` (cancel a refresh or an older action still running).
+  Part of the search form on a full page load; sent again out-of-band (`oob`) with
+  every table fragment so it stays in sync with the table.
+#}
+{% set fb = filter_bar %}
+<div id="{{ fb.id }}" class="filter-bar"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% for p in fb.params %}<input type="hidden" name="{{ p.0 }}" value="{{ p.1 }}">{% endfor %}
+  <input type="hidden" name="sort" value="{{ fb.sort }}">
+  <input type="hidden" name="dir" value="{{ fb.dir }}">
+  <button type="button" class="filter-btn{% if fb.chips %} is-active{% endif %}"
+          hx-get="{{ fb.modal_url }}"
+          hx-include="#{{ fb.form }}"
+          hx-target="#modal-root"
+          hx-swap="innerHTML">
+    <i class="fas fa-sliders"></i> Filtres ({{ fb.chips | length }})
+  </button>
+  {# Current sort, shown only when the table is cards (no column headers then):
+     the label opens the modal, the arrow flips the direction. #}
+  <span class="filter-chip sort-chip">
+    <button type="button" class="sort-chip-label" title="Changer le tri"
+            hx-get="{{ fb.modal_url }}"
+            hx-include="#{{ fb.form }}"
+            hx-target="#modal-root"
+            hx-swap="innerHTML">
+      Tri : {{ fb.sort_label }}
+    </button>
+    <button type="button" title="{% if fb.dir == 'asc' %}Croissant — passer en décroissant{% else %}Décroissant — passer en croissant{% endif %}"
+            aria-label="Inverser l'ordre"
+            hx-get="{{ fb.list_url }}?{{ fb.flip_query }}"
+            hx-target="{{ fb.target }}"
+            hx-swap="outerHTML"
+            hx-sync="{{ fb.sync }}:replace"
+            hx-push-url="true">
+      <i class="fas {% if fb.dir == 'asc' %}fa-arrow-up-short-wide{% else %}fa-arrow-down-wide-short{% endif %}"></i>
+    </button>
+  </span>
+  {% for c in fb.chips %}
+  <span class="filter-chip" title="{{ c.label }}">
+    <i class="fas {{ c.icon }}"></i>
+    <span class="filter-chip-label">{{ c.label }}</span>
+    <button type="button" aria-label="Retirer ce filtre"
+            hx-get="{{ fb.list_url }}?{{ c.remove_query }}"
+            hx-target="{{ fb.target }}"
+            hx-swap="outerHTML"
+            hx-sync="{{ fb.sync }}:replace"
+            hx-push-url="true">
+      <i class="fas fa-xmark"></i>
+    </button>
+  </span>
+  {% endfor %}
+  {% if fb.chips | length > 1 %}
+  <button type="button" class="filter-clear"
+          hx-get="{{ fb.list_url }}?{{ fb.cleared_query }}"
+          hx-target="{{ fb.target }}"
+          hx-swap="outerHTML"
+          hx-sync="{{ fb.sync }}:replace"
+          hx-push-url="true">
+    Tout effacer
+  </button>
+  {% endif %}
+</div>

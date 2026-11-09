@@ -1,0 +1,108 @@
+{#
+  Rendered alone by GET /imported-files/filters into #modal-root, pre-filled with the
+  current view. Same behaviour as modal/transaction_filters.html: "Appliquer" loads the
+  table with these filters (the search in a hidden input; the sort from the "Tri" section, modal/_sort_fields.html) and closes
+  once it answers; "Effacer" only empties the filter fields. Only .filters-body
+  scrolls: the header and the footer buttons always stay visible.
+#}
+<div class="modal-sheet card w-full" style="--modal-width: 32rem">
+  {% set modal_title = "Filtres et tri" %}{% set modal_icon = "fa-sliders" %}
+  {% set modal_subtitle = "Choisissez le tri et les filtres du tableau" %}
+  {% include "modal/_header.html" %}
+  <form class="filters-form"
+        hx-get="/imported-files"
+        hx-target="#files-table"
+        hx-swap="outerHTML"
+        hx-sync="#files-card:replace"
+        hx-push-url="true"
+        hx-disabled-elt="find button[type=submit]"
+        hx-on::after-request="if (event.detail.successful) window.dispatchEvent(new CustomEvent('close-modal'))">
+    <input type="hidden" name="search" value="{{ search }}" data-keep>
+
+    <div class="filters-body">
+      {% include "modal/_sort_fields.html" %}
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-calendar"></i> Date d'import</legend>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label" for="file-filter-year">Année</label>
+            <select id="file-filter-year" name="year" class="input">
+              <option value="">Toutes</option>
+              {% for y in years %}
+              <option value="{{ y }}" {% if year == y %}selected{% endif %}>{{ y }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="label" for="file-filter-month">Mois</label>
+            <select id="file-filter-month" name="month" class="input">
+              <option value="">Tous</option>
+              {% for m in months %}
+              <option value="{{ loop.index }}" {% if month == loop.index %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="label" for="file-filter-date-from">Du</label>
+            <input id="file-filter-date-from" type="date" name="date_from" value="{{ date_from }}" class="input">
+          </div>
+          <div>
+            <label class="label" for="file-filter-date-to">Au</label>
+            <input id="file-filter-date-to" type="date" name="date_to" value="{{ date_to }}" class="input">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-building-columns"></i> Banque</legend>
+        <div class="choice-group">
+          {% for b in banks %}
+          <label class="choice"><input type="checkbox" name="bank" value="{{ b.id }}" {% if b.id in bank_ids %}checked{% endif %}><span>{{ b.name }}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-user"></i> Importé par</legend>
+        <div class="choice-group">
+          {% for u in users %}
+          <label class="choice"><input type="checkbox" name="importer" value="{{ u.id }}" {% if u.id in importer_ids %}checked{% endif %}><span>{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-list"></i> Nombre de transactions</legend>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label" for="file-filter-count-min">Minimum</label>
+            <input id="file-filter-count-min" type="number" name="count_min" value="{{ count_min }}"
+                   min="0" step="1" inputmode="numeric" placeholder="0" class="input">
+          </div>
+          <div>
+            <label class="label" for="file-filter-count-max">Maximum</label>
+            <input id="file-filter-count-max" type="number" name="count_max" value="{{ count_max }}"
+                   min="0" step="1" inputmode="numeric" placeholder="—" class="input">
+          </div>
+        </div>
+      </fieldset>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary filters-clear"
+              hx-on:click="this.form.querySelectorAll('input:not([data-keep]), select').forEach(el => {
+                if (el.type === 'checkbox') el.checked = false;
+                else if (el.type === 'radio') el.checked = el.value === '';
+                else if (el.tagName === 'SELECT') el.selectedIndex = 0;
+                else el.value = '';
+              })">
+        <i class="fas fa-eraser mr-1"></i> Effacer
+      </button>
+      <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+      <button type="submit" class="btn-primary">
+        <i class="fas fa-check mr-1"></i> Appliquer
+      </button>
+    </div>
+  </form>
+</div>

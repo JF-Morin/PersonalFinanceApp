@@ -5,10 +5,13 @@
   100 more, and refreshes keep the number of rows already loaded.
   Re-fetches itself with the current filters/sort on SSE `transactions` (any user's
   change: manual, edit, shares, delete, carousel, PDF import/reparse/delete) and on
-  `transactions-changed` (this user's own saves). hx-sync="this:replace" keeps only
-  the latest refresh when both arrive together.
-  Sort headers keep the filters and push the new URL.
-  Narrow screens: the table turns into cards and the sortable headers into chips
+  `transactions-changed` (this user's own saves).
+  One `hx-sync` group (the table card, #transactions-card) for every request that
+  reloads the table: this refresh is dropped while another one is running (that answer
+  is at least as fresh), and the user's actions (search, filters, sort, chips, scroll)
+  cancel a running refresh — so an older view can never land after a newer one.
+  Every column header sorts (keeping the filters) and pushes the new URL.
+  Narrow screens: the table turns into cards and the column headers are hidden
   (.rtable in components.css; the .m-only parts of each row show only then).
 #}
 {% set base = filter_query %}{% if base %}{% set base = base ~ "&" %}{% endif %}
@@ -16,25 +19,23 @@
        hx-get="/transactions?{{ refresh_query }}"
        hx-trigger="sse:transactions, transactions-changed from:body, htmx:sseOpen from:body, visibilitychange[document.visibilityState=='visible'] from:document"
        hx-swap="outerHTML"
-       hx-sync="this:replace"
+       hx-sync="#transactions-card:drop"
        hx-disinherit="*">
   <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600 sticky top-0 z-10">
     <tr>
-      <th class="table-header" style="width:1%;white-space:nowrap"></th>
       {% for c in columns %}
-      <th class="table-header{% if c.key %} th-sort{% endif %}{% if c.dir %} is-sorted{% endif %}" style="{{ c.style }}">
-        {% if c.key %}
+      <th class="table-header th-sort{% if c.dir %} is-sorted{% endif %}" style="{{ c.style }}">
         <span class="flex items-center gap-1 cursor-pointer select-none whitespace-nowrap"
               hx-get="/transactions?{{ base }}sort={{ c.key }}&dir={{ c.next_dir }}"
               hx-target="#transactions-table"
               hx-swap="outerHTML"
+              hx-sync="#transactions-card:replace"
               hx-push-url="true">
           {{ c.label }}
           {% if c.dir == "asc" %}<i class="fas fa-sort-up text-indigo-500 text-xs"></i>
           {% elif c.dir == "desc" %}<i class="fas fa-sort-down text-indigo-500 text-xs"></i>
           {% else %}<i class="fas fa-sort text-gray-400 text-xs"></i>{% endif %}
         </span>
-        {% else %}{{ c.label }}{% endif %}
       </th>
       {% endfor %}
       <th class="table-header" style="width:1%;white-space:nowrap"></th>
@@ -51,7 +52,8 @@
     <tr hx-get="/transactions?{{ next_query }}"
         hx-trigger="intersect once"
         hx-target="#transactions-table"
-        hx-swap="outerHTML">
+        hx-swap="outerHTML"
+        hx-sync="#transactions-card:replace">
       <td colspan="9" class="text-center py-4 text-sm text-gray-400">
         <i class="fas fa-spinner fa-spin mr-1"></i>
         Chargement… ({{ transactions | length }} / {{ total }})
@@ -68,4 +70,4 @@
     {% endif %}
   </tbody>
 </table>
-{% if oob %}{% include "pages/transactions/_state.html" %}{% endif %}
+{% if oob %}{% include "layout/_filter_bar.html" %}{% endif %}

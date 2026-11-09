@@ -15,12 +15,13 @@
 /// each own a percentage of a single transaction (e.g., rent split 50/50). Forms submit
 /// them as one `shares_json` field (built by `modal/_shares_field.html`).
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::{header, HeaderMap},
     response::{Html, IntoResponse, Response},
     Form,
 };
-use axum_extra::extract::cookie::SignedCookieJar;
+// axum-extra's Query accepts repeated keys (`?owner=1&owner=2`) into a Vec.
+use axum_extra::extract::{cookie::SignedCookieJar, Query};
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
 use std::collections::HashMap;
@@ -32,21 +33,47 @@ use crate::{
     AppState,
 };
 use super::{
+    filters::{self, FilterBar},
     base_context, events_header, get_user_id, htmx_inline_error, is_htmx, is_htmx_boost,
     toast_header, toast_response,
 };
 
 // ── Filters and sorting ───────────────────────────────────────────────────────
 
-/// Query string of the transactions page (`?search=&category_id=&year=&sort=&dir=&limit=`).
-/// Every field is a string because an empty `<input>` / `<select>` submits "".
-/// `year` absent means "the current year" (see `default_to_current_year`); `year=` (empty,
-/// the "Toutes" button) means all years.
-#[derive(Deserialize, Default)]
+/// Query string of the transactions page. The search box sends `search`; the filters
+/// modal (`modal/transaction_filters.html`) sends the others; the sort headers send
+/// `sort` / `dir`; scroll loading sends `limit`. Multi-choice filters (`category`,
+/// `owner`, `participant`, `status`) repeat their key (`?owner=1&owner=2`). Every single
+/// value is a string because an empty `<input>` / `<select>` submits "".
+/// `year` absent (or empty: axum-extra's `Query` reads "" as `None`) means "the current
+/// year" (see `default_to_current_year`); `year=all` means all years.
+#[derive(Deserialize, Default, Clone)]
 pub struct TransactionFilter {
     pub search: Option<String>,
-    pub category_id: Option<String>,
     pub year: Option<String>,
+    /// 1–12, in every selected year.
+    pub month: Option<String>,
+    /// Inclusive bounds, `YYYY-MM-DD`.
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    /// Category ids, or "none" for transactions without a category.
+    #[serde(default)]
+    pub category: Vec<String>,
+    #[serde(default)]
+    pub owner: Vec<String>,
+    /// Users with a share in the transaction.
+    #[serde(default)]
+    pub participant: Vec<String>,
+    /// "pending" / "broken" / "complete".
+    #[serde(default)]
+    pub status: Vec<String>,
+    /// "debit" (expenses) or "credit" (income).
+    pub kind: Option<String>,
+    /// Bounds on the absolute amount.
+    pub amount_min: Option<String>,
+    pub amount_max: Option<String>,
+    /// "manual" or "pdf".
+    pub source: Option<String>,
     pub sort: Option<String>,
     pub dir: Option<String>,
     /// How many rows the table shows (scroll loading asks for PAGE_SIZE more each time).
@@ -56,29 +83,61 @@ pub struct TransactionFilter {
 /// Rows per scroll step on the transactions page.
 const PAGE_SIZE: usize = 100;
 
+const STATUSES: [(&str, &str); 3] = [
+    ("pending", "À compléter"),
+    ("broken", "Échec"),
+    ("complete", "Complète"),
+];
+
 impl TransactionFilter {
-    fn search(&self) -> Option<&str> {
-        self.search.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    fn search(&self) -> Option<&str> { filters::text(&self.search) }
+    fn year(&self) -> Option<&str> { filters::year(&self.year) }
+    fn month(&self) -> Option<u32> { filters::month(&self.month) }
+    fn date_from(&self) -> Option<&str> { filters::date(&self.date_from) }
+    fn date_to(&self) -> Option<&str> { filters::date(&self.date_to) }
+    fn category_ids(&self) -> Vec<i64> { filters::ids(&self.category) }
+    fn category_none(&self) -> bool { self.category.iter().any(|c| c == "none") }
+    fn owner_ids(&self) -> Vec<i64> { filters::ids(&self.owner) }
+    fn participant_ids(&self) -> Vec<i64> { filters::ids(&self.participant) }
+    fn amount_min(&self) -> Option<f64> { filters::number(&self.amount_min) }
+    fn amount_max(&self) -> Option<f64> { filters::number(&self.amount_max) }
+
+    fn statuses(&self) -> Vec<&'static str> {
+        STATUSES.iter().map(|&(s, _)| s).filter(|s| self.status.iter().any(|v| v == s)).collect()
     }
 
-    fn category_id(&self) -> Option<i64> {
-        self.category_id.as_deref().and_then(|s| s.parse().ok())
+    fn kind(&self) -> Option<&'static str> {
+        match self.kind.as_deref() {
+            Some("debit") => Some("debit"),
+            Some("credit") => Some("credit"),
+            _ => None,
+        }
     }
 
-    fn year(&self) -> Option<&str> {
-        self.year
-            .as_deref()
-            .filter(|y| y.len() == 4 && y.chars().all(|c| c.is_ascii_digit()))
+    fn source(&self) -> Option<&'static str> {
+        match self.source.as_deref() {
+            Some("manual") => Some("manual"),
+            Some("pdf") => Some("pdf"),
+            _ => None,
+        }
+    }
+
+    /// Forget categories / users that no longer exist (`filters::retain_known`).
+    fn retain_known(&mut self, categories: &[Category], users: &[User]) {
+        let category_ids: Vec<i64> = categories.iter().map(|c| c.id).collect();
+        let user_ids: Vec<i64> = users.iter().map(|u| u.id).collect();
+        filters::retain_known(&mut self.category, &category_ids, &["none"]);
+        filters::retain_known(&mut self.owner, &user_ids, &[]);
+        filters::retain_known(&mut self.participant, &user_ids, &[]);
     }
 
     /// (column, direction); unknown values fall back to the default, newest first.
     fn sort(&self) -> (&'static str, &'static str) {
-        let col = match self.sort.as_deref() {
-            Some("category") => "category",
-            Some("owner") => "owner",
-            Some("amount") => "amount",
-            _ => "date",
-        };
+        let col = TABLE_COLUMNS
+            .iter()
+            .map(|c| c.2)
+            .find(|&key| Some(key) == self.sort.as_deref())
+            .unwrap_or("date");
         let dir = match self.dir.as_deref() {
             Some("asc") => "asc",
             Some("desc") => "desc",
@@ -88,18 +147,29 @@ impl TransactionFilter {
         (col, dir)
     }
 
-    /// The filters (not the sort) as a query string, e.g. `search=loyer&year=2026`.
+    /// The modal's filters (not the search, not the sort) as (name, value) pairs —
+    /// the hidden inputs of the search form and, with the search, `filter_query`.
+    fn params(&self) -> Vec<(&'static str, String)> {
+        // Always explicit: no `year` would mean "current year", so "all years" is `year=all`.
+        let mut p = vec![("year", self.year().unwrap_or("all").to_string())];
+        if let Some(m) = self.month() { p.push(("month", m.to_string())); }
+        if let Some(d) = self.date_from() { p.push(("date_from", d.to_string())); }
+        if let Some(d) = self.date_to() { p.push(("date_to", d.to_string())); }
+        if self.category_none() { p.push(("category", "none".to_string())); }
+        p.extend(self.category_ids().into_iter().map(|c| ("category", c.to_string())));
+        p.extend(self.owner_ids().into_iter().map(|u| ("owner", u.to_string())));
+        p.extend(self.participant_ids().into_iter().map(|u| ("participant", u.to_string())));
+        p.extend(self.statuses().into_iter().map(|s| ("status", s.to_string())));
+        if let Some(k) = self.kind() { p.push(("kind", k.to_string())); }
+        if let Some(a) = self.amount_min() { p.push(("amount_min", a.to_string())); }
+        if let Some(a) = self.amount_max() { p.push(("amount_max", a.to_string())); }
+        if let Some(s) = self.source() { p.push(("source", s.to_string())); }
+        p
+    }
+
+    /// Search + filters (not the sort) as a query string, e.g. `search=loyer&year=2026`.
     fn filter_query(&self) -> String {
-        let mut parts = Vec::new();
-        if let Some(s) = self.search() {
-            parts.push(format!("search={}", url_encode(s)));
-        }
-        if let Some(c) = self.category_id() {
-            parts.push(format!("category_id={}", c));
-        }
-        // Always explicit: no `year` would mean "current year", so "all years" is `year=`.
-        parts.push(format!("year={}", self.year().unwrap_or("")));
-        parts.join("&")
+        filters::query_string(self.search(), &self.params())
     }
 
     /// Rows to show: at least one page, more once the user has scrolled.
@@ -123,36 +193,144 @@ impl TransactionFilter {
         let (sort, dir) = self.sort();
         format!("{}&sort={}&dir={}", self.filter_query(), sort, dir)
     }
+
+    /// The filter bar above the table: hidden inputs, chips (search excluded: it stays
+    /// in its box), and the view with every filter removed.
+    fn filter_bar(&self, categories: &[Category], users: &[User]) -> FilterBar {
+        let mut chips = filters::Chips::new(self, Self::full_query);
+        let user_names = |selected: Vec<i64>| -> String {
+            users.iter().filter(|u| selected.contains(&u.id)).map(User::display_name).collect::<Vec<_>>().join(", ")
+        };
+
+        if let Some(y) = self.year() {
+            chips.add("fa-calendar", format!("Année : {}", y), |f| f.year = Some("all".to_string()));
+        }
+        if let Some(m) = self.month() {
+            chips.add("fa-calendar-day", format!("Mois : {}", filters::MONTHS[m as usize - 1]), |f| f.month = None);
+        }
+        if let Some(p) = filters::date_range_label(self.date_from(), self.date_to()) {
+            chips.add("fa-calendar-week", p, |f| { f.date_from = None; f.date_to = None; });
+        }
+        let selected = self.category_ids();
+        let mut names: Vec<String> = Vec::new();
+        if self.category_none() { names.push("Sans catégorie".to_string()); }
+        names.extend(categories.iter().filter(|c| selected.contains(&c.id)).map(|c| c.name.clone()));
+        if !names.is_empty() {
+            chips.add("fa-tag", format!("Catégorie : {}", names.join(", ")), |f| f.category.clear());
+        }
+        let owners = user_names(self.owner_ids());
+        if !owners.is_empty() {
+            chips.add("fa-user", format!("Propriétaire : {}", owners), |f| f.owner.clear());
+        }
+        let participants = user_names(self.participant_ids());
+        if !participants.is_empty() {
+            chips.add("fa-users", format!("Participant : {}", participants), |f| f.participant.clear());
+        }
+        let statuses = self.statuses();
+        if !statuses.is_empty() {
+            let labels: Vec<&str> = STATUSES.iter().filter(|(s, _)| statuses.contains(s)).map(|&(_, l)| l).collect();
+            chips.add("fa-circle-half-stroke", format!("Statut : {}", labels.join(", ")), |f| f.status.clear());
+        }
+        if let Some(k) = self.kind() {
+            let label = if k == "debit" { "Dépenses" } else { "Revenus" };
+            chips.add("fa-right-left", label.to_string(), |f| f.kind = None);
+        }
+        let amount = filters::number_range_label(
+            "Montant",
+            self.amount_min().map(|a| format!("{:.2}", a)),
+            self.amount_max().map(|a| format!("{:.2}", a)),
+        );
+        if let Some(a) = amount {
+            chips.add("fa-coins", a, |f| { f.amount_min = None; f.amount_max = None; });
+        }
+        if let Some(s) = self.source() {
+            let label = if s == "manual" { "Source : manuelle" } else { "Source : PDF" };
+            chips.add("fa-file", label.to_string(), |f| f.source = None);
+        }
+
+        let cleared = TransactionFilter {
+            search: self.search.clone(),
+            year: Some("all".to_string()),
+            sort: self.sort.clone(),
+            dir: self.dir.clone(),
+            ..Default::default()
+        };
+        let (sort, dir) = self.sort();
+        let flipped = TransactionFilter { dir: Some(filters::flip(dir).to_string()), ..self.clone() };
+        FilterBar {
+            id: "transactions-filter-bar",
+            form: "transaction-filters",
+            list_url: "/transactions",
+            target: "#transactions-table",
+            sync: "#transactions-card",
+            modal_url: "/transactions/filters",
+            params: self.params(),
+            sort,
+            dir,
+            sort_label: TABLE_COLUMNS.iter().find(|c| c.2 == sort).map_or("", |c| c.0),
+            flip_query: flipped.full_query(),
+            chips: chips.chips,
+            cleared_query: cleared.full_query(),
+        }
+    }
 }
 
-fn url_encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{:02X}", b),
-        })
-        .collect()
-}
-
-/// Apply the search / category / year filters and the sort to an already-fetched list.
+/// Apply the search and every filter, then the sort, to an already-fetched list.
 /// Rows arrive newest first and `sort_by` is stable, so ties keep that order.
 fn filter_and_sort(mut views: Vec<TransactionView>, filter: &TransactionFilter) -> Vec<TransactionView> {
     if let Some(s) = filter.search() {
         let s = s.to_lowercase();
         views.retain(|t| t.operation.to_lowercase().contains(&s));
     }
-    if let Some(c) = filter.category_id() {
-        views.retain(|t| t.category_id == Some(c));
+    let (year, month, from, to) = (filter.year(), filter.month(), filter.date_from(), filter.date_to());
+    views.retain(|t| filters::in_period(&t.date, year, month, from, to));
+    if !filter.category.is_empty() {
+        let (ids, none) = (filter.category_ids(), filter.category_none());
+        views.retain(|t| match t.category_id {
+            Some(c) => ids.contains(&c),
+            None => none,
+        });
     }
-    if let Some(y) = filter.year() {
-        views.retain(|t| t.date.starts_with(y));
+    let owners = filter.owner_ids();
+    if !owners.is_empty() {
+        views.retain(|t| owners.contains(&t.owner_id));
+    }
+    let participants = filter.participant_ids();
+    if !participants.is_empty() {
+        views.retain(|t| t.shares.iter().any(|s| participants.contains(&s.user_id)));
+    }
+    let statuses = filter.statuses();
+    if !statuses.is_empty() {
+        views.retain(|t| statuses.contains(&t.status_name.as_str()));
+    }
+    match filter.kind() {
+        Some("debit") => views.retain(|t| t.amount < 0.0),
+        Some("credit") => views.retain(|t| t.amount >= 0.0),
+        _ => {}
+    }
+    if let Some(min) = filter.amount_min() {
+        views.retain(|t| t.amount.abs() >= min - 0.005);
+    }
+    if let Some(max) = filter.amount_max() {
+        views.retain(|t| t.amount.abs() <= max + 0.005);
+    }
+    if let Some(source) = filter.source() {
+        views.retain(|t| t.is_manual == (source == "manual"));
     }
     let (col, dir) = filter.sort();
+    let lower = |s: Option<&str>| s.unwrap_or("").to_lowercase();
+    // Participants sort by their names (then shares), "(N/A)" first.
+    let participants_key = |t: &TransactionView| -> String {
+        t.shares.iter().map(|s| format!("{} {:06.2}", s.user_name, s.share)).collect::<Vec<_>>().join(", ").to_lowercase()
+    };
     views.sort_by(|a, b| {
         let ord = match col {
-            "category" => a.category_name.as_deref().unwrap_or("").to_lowercase()
-                .cmp(&b.category_name.as_deref().unwrap_or("").to_lowercase()),
+            "source" => a.is_manual.cmp(&b.is_manual),
+            "operation" => a.operation.to_lowercase().cmp(&b.operation.to_lowercase()),
+            "category" => lower(a.category_name.as_deref()).cmp(&lower(b.category_name.as_deref())),
             "owner" => a.owner_name.to_lowercase().cmp(&b.owner_name.to_lowercase()),
+            "participants" => participants_key(a).cmp(&participants_key(b)),
+            "note" => lower(a.notes.as_deref()).cmp(&lower(b.notes.as_deref())),
             "amount" => a.amount.total_cmp(&b.amount),
             _ => a.date.cmp(&b.date),
         };
@@ -166,7 +344,6 @@ fn filter_and_sort(mut views: Vec<TransactionView>, filter: &TransactionFilter) 
 struct TableColumn {
     label: &'static str,
     style: &'static str,
-    /// Sort key, or "" for a column that can't be sorted.
     key: &'static str,
     /// "asc" / "desc" when the table is sorted by this column, "" otherwise.
     dir: &'static str,
@@ -174,14 +351,16 @@ struct TableColumn {
     next_dir: &'static str,
 }
 
-/// (label, style, sort key) of the data columns, between the icon and action columns.
-const TABLE_COLUMNS: [(&str, &str, &str); 7] = [
+/// (label, style, sort key) of the data columns, before the action column. Every one
+/// is sortable (`filter_and_sort`).
+const TABLE_COLUMNS: [(&str, &str, &str); 8] = [
+    ("Source",       "width:1%;white-space:nowrap", "source"),
     ("Date",         "width:1%;white-space:nowrap", "date"),
-    ("Opération",    "min-width:12rem",             ""),
+    ("Opération",    "min-width:12rem",             "operation"),
     ("Catégorie",    "",                            "category"),
     ("Propriétaire", "width:1%;white-space:nowrap", "owner"),
-    ("Participants", "",                            ""),
-    ("Note",         "min-width:10rem",             ""),
+    ("Participants", "",                            "participants"),
+    ("Note",         "min-width:10rem",             "note"),
     ("Montant",      "width:1%;white-space:nowrap", "amount"),
 ];
 
@@ -195,7 +374,7 @@ fn insert_table(ctx: &mut tera::Context, transactions: &[TransactionView], filte
     let columns: Vec<TableColumn> = TABLE_COLUMNS
         .iter()
         .map(|&(label, style, key)| {
-            let active = if !key.is_empty() && key == sort { dir } else { "" };
+            let active = if key == sort { dir } else { "" };
             TableColumn { label, style, key, dir: active, next_dir: if active == "asc" { "desc" } else { "asc" } }
         })
         .collect();
@@ -209,16 +388,23 @@ fn insert_table(ctx: &mut tera::Context, transactions: &[TransactionView], filte
     ctx.insert("refresh_query", &if limit > PAGE_SIZE { format!("{}&limit={}", full, limit) } else { full.clone() });
     ctx.insert("next_query", &format!("{}&limit={}", full, limit + PAGE_SIZE));
     ctx.insert("current_user_id", &user_id);
-    ctx.insert("sort", sort);
-    ctx.insert("dir", dir);
     ctx.insert("filter_query", &filter.filter_query());
-    ctx.insert("full_query", &filter.full_query());
 }
 
 // ── Page and table ────────────────────────────────────────────────────────────
 
+async fn categories_and_users(db: &DbPool) -> AppResult<(Vec<Category>, Vec<User>)> {
+    let categories = sqlx::query_as::<_, Category>("SELECT * FROM categories ORDER BY name")
+        .fetch_all(db)
+        .await?;
+    let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
+        .fetch_all(db)
+        .await?;
+    Ok((categories, users))
+}
+
 /// GET /transactions — full page, or (HTMX, not boost) only the table fragment
-/// `_table.html`, which also updates the sort inputs / CSV link out-of-band.
+/// `_table.html`, which also updates the filter bar (hidden inputs, chips) out-of-band.
 pub async fn get_transactions(
     State(state): State<AppState>,
     jar: SignedCookieJar,
@@ -227,11 +413,14 @@ pub async fn get_transactions(
 ) -> AppResult<Html<String>> {
     let user_id = get_user_id(&jar)?;
     filter.default_to_current_year(&state.db).await?;
+    let (categories, users) = categories_and_users(&state.db).await?;
+    filter.retain_known(&categories, &users);
     let transactions = filter_and_sort(fetch_transaction_views(&state.db, false).await?, &filter);
 
     if is_htmx(&headers) && !is_htmx_boost(&headers) {
         let mut ctx = tera::Context::new();
         insert_table(&mut ctx, &transactions, &filter, user_id);
+        ctx.insert("filter_bar", &filter.filter_bar(&categories, &users));
         ctx.insert("oob", &true);
         let html = state.tera.render("pages/transactions/_table.html", &ctx)?;
         return Ok(Html(html));
@@ -239,26 +428,62 @@ pub async fn get_transactions(
 
     let mut ctx = base_context(&jar, &state.db, "/transactions").await?;
     insert_table(&mut ctx, &transactions, &filter, user_id);
+    ctx.insert("filter_bar", &filter.filter_bar(&categories, &users));
     ctx.insert("oob", &false);
+    ctx.insert("search", &filter.search().unwrap_or(""));
+    ctx.insert("pending_count", &pending_count(&state.db, user_id).await?);
 
-    let categories = sqlx::query_as::<_, Category>("SELECT * FROM categories ORDER BY name")
-        .fetch_all(&state.db)
-        .await?;
+    let html = state.tera.render("pages/transactions/transactions.html", &ctx)?;
+    Ok(Html(html))
+}
+
+/// GET /transactions/filters — the filters modal, pre-filled with the current view
+/// (the "Filtres" button sends the search form: search, filters and sort). Applying
+/// it loads the table with the new filters (search and sort carried in hidden inputs).
+pub async fn get_filters_modal(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Query(mut filter): Query<TransactionFilter>,
+) -> AppResult<Html<String>> {
+    get_user_id(&jar)?;
+    filter.default_to_current_year(&state.db).await?;
+    let (categories, users) = categories_and_users(&state.db).await?;
+    filter.retain_known(&categories, &users);
     let years: Vec<String> = sqlx::query_scalar(
         "SELECT substr(date, 1, 4) AS y FROM transactions \
          UNION SELECT strftime('%Y', 'now', 'localtime') ORDER BY y DESC",
     )
     .fetch_all(&state.db)
     .await?;
+    let (sort, dir) = filter.sort();
 
+    let mut ctx = tera::Context::new();
     ctx.insert("categories", &categories);
+    ctx.insert("users", &users);
     ctx.insert("years", &years);
+    ctx.insert("months", &filters::MONTHS);
+    ctx.insert("statuses", &STATUSES);
     ctx.insert("search", &filter.search().unwrap_or(""));
-    ctx.insert("category_id", &filter.category_id());
+    ctx.insert("sort", sort);
+    ctx.insert("dir", dir);
+    let sort_choices: Vec<filters::SortChoice> =
+        TABLE_COLUMNS.iter().map(|&(label, _, key)| filters::SortChoice { key, label }).collect();
+    ctx.insert("sort_choices", &sort_choices);
     ctx.insert("year", &filter.year().unwrap_or(""));
-    ctx.insert("pending_count", &pending_count(&state.db, user_id).await?);
+    ctx.insert("month", &filter.month());
+    ctx.insert("date_from", &filter.date_from().unwrap_or(""));
+    ctx.insert("date_to", &filter.date_to().unwrap_or(""));
+    ctx.insert("category_ids", &filter.category_ids());
+    ctx.insert("category_none", &filter.category_none());
+    ctx.insert("owner_ids", &filter.owner_ids());
+    ctx.insert("participant_ids", &filter.participant_ids());
+    ctx.insert("selected_statuses", &filter.statuses());
+    ctx.insert("kind", &filter.kind().unwrap_or(""));
+    ctx.insert("amount_min", &filter.amount_min().map(|a| a.to_string()).unwrap_or_default());
+    ctx.insert("amount_max", &filter.amount_max().map(|a| a.to_string()).unwrap_or_default());
+    ctx.insert("source", &filter.source().unwrap_or(""));
 
-    let html = state.tera.render("pages/transactions/transactions.html", &ctx)?;
+    let html = state.tera.render("modal/transaction_filters.html", &ctx)?;
     Ok(Html(html))
 }
 
@@ -271,6 +496,8 @@ pub async fn get_export_csv(
 ) -> AppResult<Response> {
     get_user_id(&jar)?;
     filter.default_to_current_year(&state.db).await?;
+    let (categories, users) = categories_and_users(&state.db).await?;
+    filter.retain_known(&categories, &users);
     let transactions = filter_and_sort(fetch_transaction_views(&state.db, false).await?, &filter);
 
     let cell = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
@@ -353,6 +580,13 @@ async fn default_currency_id(db: &DbPool) -> i64 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1)
+}
+
+/// GET /transactions/actions — the phones' "Actions" sheet (add, import, CSV export),
+/// which replaces the header buttons below 640px.
+pub async fn get_actions_modal(State(state): State<AppState>, jar: SignedCookieJar) -> AppResult<Html<String>> {
+    get_user_id(&jar)?;
+    Ok(Html(state.tera.render("modal/transaction_actions.html", &tera::Context::new())?))
 }
 
 /// GET /transactions/new — the manual-entry modal.
@@ -1000,8 +1234,9 @@ async fn pending_count(db: &DbPool, user_id: i64) -> AppResult<i64> {
     .await?)
 }
 
-/// GET /transactions/pending-badge — returns the pending count badge HTML fragment.
-/// Re-fetched on SSE / `transactions-changed` so the badge stays current.
+/// GET /transactions/pending-badge — returns the pending count badge HTML fragment,
+/// plus the phones' pending strip out-of-band. Re-fetched on SSE / `transactions-changed`
+/// so both stay current.
 pub async fn get_pending_badge(
     State(state): State<AppState>,
     jar: SignedCookieJar,
@@ -1009,6 +1244,7 @@ pub async fn get_pending_badge(
     let user_id = get_user_id(&jar)?;
     let mut ctx = tera::Context::new();
     ctx.insert("pending_count", &pending_count(&state.db, user_id).await?);
+    ctx.insert("oob", &true);
     let html = state.tera.render("pages/transactions/_pending_badge.html", &ctx)?;
     Ok(Html(html))
 }

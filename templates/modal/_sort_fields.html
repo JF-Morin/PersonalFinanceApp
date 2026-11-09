@@ -1,0 +1,22 @@
+{#
+  "Tri" section of the filters modals: the sort column (every column of the table)
+  and the direction. `data-keep`: "Effacer" empties the filters, not the sort.
+  Expects `sort_choices` (key, label), `sort`, `dir`.
+#}
+<fieldset class="filters-section">
+  <legend class="filters-legend"><i class="fas fa-arrow-down-wide-short"></i> Tri</legend>
+  <div class="grid grid-cols-2 gap-3 items-end">
+    <div>
+      <label class="label" for="filter-sort">Trier par</label>
+      <select id="filter-sort" name="sort" class="input" data-keep>
+        {% for c in sort_choices %}
+        <option value="{{ c.key }}" {% if c.key == sort %}selected{% endif %}>{{ c.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="choice-group">
+      <label class="choice"><input type="radio" name="dir" value="asc" data-keep {% if dir == "asc" %}checked{% endif %}><span><i class="fas fa-arrow-up-short-wide mr-1.5"></i>Croissant</span></label>
+      <label class="choice"><input type="radio" name="dir" value="desc" data-keep {% if dir == "desc" %}checked{% endif %}><span><i class="fas fa-arrow-down-wide-short mr-1.5"></i>Décroissant</span></label>
+    </div>
+  </div>
+</fieldset>

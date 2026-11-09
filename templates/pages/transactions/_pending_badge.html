@@ -1,6 +1,8 @@
 {#
-  Rendered alone by GET /transactions/pending-badge. The wrapper re-fetches itself on
+  Rendered alone by GET /transactions/pending-badge (with `oob`: the phones' strip
+  _pending_strip.html comes along out-of-band). The wrapper re-fetches itself on
   SSE / `transactions-changed`; the button opens the carousel in #modal-root.
+  Hidden on phones (components.css), where the strip shows the count instead.
 #}
 <span id="pending-badge"
       hx-get="/transactions/pending-badge"
@@ -17,3 +19,4 @@
     {% endif %}
   </button>
 </span>
+{% if oob %}{% include "pages/transactions/_pending_strip.html" %}{% endif %}

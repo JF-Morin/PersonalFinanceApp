@@ -15,12 +15,13 @@
 /// For PDFs that use Type3 fonts (which crash pdf_extract), we fall back to lopdf-based
 /// positioned text extraction where column X coordinates distinguish debits from credits.
 use axum::{
-    extract::{Multipart, Path, Query, State},
+    extract::{Multipart, Path, State},
     http::HeaderMap,
     response::{Html, IntoResponse, Json},
     Form,
 };
-use axum_extra::extract::cookie::SignedCookieJar;
+// axum-extra's Query accepts repeated keys (`?bank=1&bank=2`) into a Vec.
+use axum_extra::extract::{cookie::SignedCookieJar, Query};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -28,11 +29,14 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     error::{AppError, AppResult},
-    models::{Bank, ParsedTransaction},
+    models::{Bank, ParsedTransaction, User},
     parsers::{all_parsers, detect_and_parse, detect_and_parse_positioned, lopdf_text},
     AppState,
 };
-use super::{base_context, is_htmx, is_htmx_boost, toast_response};
+use super::{
+    base_context, is_htmx, is_htmx_boost, toast_response,
+    filters::{self, FilterBar},
+};
 
 /// Enriched file row joined with bank name and importer name for the imports table.
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -42,16 +46,150 @@ struct ImportedFileView {
     imported_at: String,
     row_count: i64,
     source_file: String,
+    bank_id: i64,
     bank_name: String,
     importer_name: String,
     importer_id: i64,
 }
 
-/// `?sort=<column>&dir=asc|desc` on the imported files list.
-#[derive(Deserialize, Default)]
-pub struct FilesSortParams {
+/// Query string of the imported files page: `search` (file name) from the search box,
+/// the filters from `modal/file_filters.html` (`bank` and `importer` repeat their key),
+/// `sort` / `dir` from the column headers. No `year` means all years here.
+#[derive(Deserialize, Default, Clone)]
+pub struct FilesFilter {
+    search: Option<String>,
+    year: Option<String>,
+    month: Option<String>,
+    /// Inclusive bounds on the import date, `YYYY-MM-DD`.
+    date_from: Option<String>,
+    date_to: Option<String>,
+    #[serde(default)]
+    bank: Vec<String>,
+    #[serde(default)]
+    importer: Vec<String>,
+    /// Bounds on the file's current number of transactions.
+    count_min: Option<String>,
+    count_max: Option<String>,
     sort: Option<String>,
     dir: Option<String>,
+}
+
+impl FilesFilter {
+    fn search(&self) -> Option<&str> { filters::text(&self.search) }
+    fn year(&self) -> Option<&str> { filters::year(&self.year) }
+    fn month(&self) -> Option<u32> { filters::month(&self.month) }
+    fn date_from(&self) -> Option<&str> { filters::date(&self.date_from) }
+    fn date_to(&self) -> Option<&str> { filters::date(&self.date_to) }
+    fn bank_ids(&self) -> Vec<i64> { filters::ids(&self.bank) }
+    fn importer_ids(&self) -> Vec<i64> { filters::ids(&self.importer) }
+    fn count_min(&self) -> Option<i64> { filters::number(&self.count_min).map(|n| n as i64) }
+    fn count_max(&self) -> Option<i64> { filters::number(&self.count_max).map(|n| n as i64) }
+
+    /// Forget banks / users that no longer exist (`filters::retain_known`).
+    fn retain_known(&mut self, banks: &[Bank], users: &[User]) {
+        let bank_ids: Vec<i64> = banks.iter().map(|b| b.id).collect();
+        let user_ids: Vec<i64> = users.iter().map(|u| u.id).collect();
+        filters::retain_known(&mut self.bank, &bank_ids, &[]);
+        filters::retain_known(&mut self.importer, &user_ids, &[]);
+    }
+
+    /// (column key, ORDER BY expression, direction); unknown keys fall back to the
+    /// default: newest import first.
+    fn sort(&self) -> (&'static str, &'static str, &'static str) {
+        let (key, order_by) = FILE_COLUMNS
+            .iter()
+            .find(|c| Some(c.0) == self.sort.as_deref())
+            .map(|c| (c.0, c.3))
+            .unwrap_or(("date", "f.imported_at"));
+        let dir = match self.dir.as_deref() {
+            Some("asc") => "asc",
+            Some("desc") => "desc",
+            _ if key == "date" => "desc",
+            _ => "asc",
+        };
+        (key, order_by, dir)
+    }
+
+    /// The modal's filters as (name, value) pairs (hidden inputs of the search form).
+    fn params(&self) -> Vec<(&'static str, String)> {
+        let mut p = Vec::new();
+        if let Some(y) = self.year() { p.push(("year", y.to_string())); }
+        if let Some(m) = self.month() { p.push(("month", m.to_string())); }
+        if let Some(d) = self.date_from() { p.push(("date_from", d.to_string())); }
+        if let Some(d) = self.date_to() { p.push(("date_to", d.to_string())); }
+        p.extend(self.bank_ids().into_iter().map(|b| ("bank", b.to_string())));
+        p.extend(self.importer_ids().into_iter().map(|u| ("importer", u.to_string())));
+        if let Some(n) = self.count_min() { p.push(("count_min", n.to_string())); }
+        if let Some(n) = self.count_max() { p.push(("count_max", n.to_string())); }
+        p
+    }
+
+    /// Search + filters (not the sort) as a query string.
+    fn filter_query(&self) -> String {
+        filters::query_string(self.search(), &self.params())
+    }
+
+    /// Search + filters + sort: the URL that reproduces the current table.
+    fn full_query(&self) -> String {
+        let (sort, _, dir) = self.sort();
+        let filter = self.filter_query();
+        format!("{}{}sort={}&dir={}", filter, if filter.is_empty() { "" } else { "&" }, sort, dir)
+    }
+
+    fn filter_bar(&self, banks: &[Bank], users: &[User]) -> FilterBar {
+        let mut chips = filters::Chips::new(self, Self::full_query);
+        if let Some(y) = self.year() {
+            chips.add("fa-calendar", format!("Année : {}", y), |f| f.year = None);
+        }
+        if let Some(m) = self.month() {
+            chips.add("fa-calendar-day", format!("Mois : {}", filters::MONTHS[m as usize - 1]), |f| f.month = None);
+        }
+        if let Some(p) = filters::date_range_label(self.date_from(), self.date_to()) {
+            chips.add("fa-calendar-week", p, |f| { f.date_from = None; f.date_to = None; });
+        }
+        let selected = self.bank_ids();
+        let names: Vec<&str> = banks.iter().filter(|b| selected.contains(&b.id)).map(|b| b.name.as_str()).collect();
+        if !names.is_empty() {
+            chips.add("fa-building-columns", format!("Banque : {}", names.join(", ")), |f| f.bank.clear());
+        }
+        let selected = self.importer_ids();
+        let names: Vec<String> = users.iter().filter(|u| selected.contains(&u.id)).map(User::display_name).collect();
+        if !names.is_empty() {
+            chips.add("fa-user", format!("Importé par : {}", names.join(", ")), |f| f.importer.clear());
+        }
+        let count = filters::number_range_label(
+            "Transactions",
+            self.count_min().map(|n| n.to_string()),
+            self.count_max().map(|n| n.to_string()),
+        );
+        if let Some(c) = count {
+            chips.add("fa-list", c, |f| { f.count_min = None; f.count_max = None; });
+        }
+
+        let cleared = FilesFilter {
+            search: self.search.clone(),
+            sort: self.sort.clone(),
+            dir: self.dir.clone(),
+            ..Default::default()
+        };
+        let (sort, _, dir) = self.sort();
+        let flipped = FilesFilter { dir: Some(filters::flip(dir).to_string()), ..self.clone() };
+        FilterBar {
+            id: "files-filter-bar",
+            form: "file-filters",
+            list_url: "/imported-files",
+            target: "#files-table",
+            sync: "#files-card",
+            modal_url: "/imported-files/filters",
+            params: self.params(),
+            sort,
+            dir,
+            sort_label: FILE_COLUMNS.iter().find(|c| c.0 == sort).map_or("", |c| c.1),
+            flip_query: flipped.full_query(),
+            chips: chips.chips,
+            cleared_query: cleared.full_query(),
+        }
+    }
 }
 
 /// One sortable column header, as the `_table.html` template needs it.
@@ -75,25 +213,24 @@ const FILE_COLUMNS: [(&str, &str, &str, &str); 5] = [
     ("importer",     "Importé par",  "6rem",  "importer_name COLLATE NOCASE"),
 ];
 
-/// Render the files table (`pages/imports/_table.html`) into `ctx`'s variables.
-/// Unknown sort keys fall back to the default: newest import first.
+async fn banks_and_users(db: &crate::db::DbPool) -> AppResult<(Vec<Bank>, Vec<User>)> {
+    let banks = sqlx::query_as::<_, Bank>("SELECT * FROM banks ORDER BY name").fetch_all(db).await?;
+    let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name").fetch_all(db).await?;
+    Ok((banks, users))
+}
+
+/// Render the files table (`pages/imports/_table.html`) and its filter bar into `ctx`.
+/// Sorting happens in SQL, filtering afterwards in Rust (a handful of rows).
 async fn insert_files_table(
     ctx: &mut tera::Context,
     db: &crate::db::DbPool,
-    params: &FilesSortParams,
+    filter: &FilesFilter,
     current_user_id: i64,
 ) -> AppResult<()> {
-    let (sort, order_by) = FILE_COLUMNS
-        .iter()
-        .find(|c| Some(c.0) == params.sort.as_deref())
-        .map(|c| (c.0, c.3))
-        .unwrap_or(("date", "f.imported_at"));
-    let dir = match params.dir.as_deref() {
-        Some("asc") => "asc",
-        Some("desc") => "desc",
-        _ if sort == "date" => "desc",
-        _ => "asc",
-    };
+    let (all_banks, users) = banks_and_users(db).await?;
+    let mut filter = filter.clone();
+    filter.retain_known(&all_banks, &users);
+    let (sort, order_by, dir) = filter.sort();
 
     // `order_by` and `dir` come from the whitelists above, never from user input.
     let sql = format!(
@@ -103,6 +240,7 @@ async fn insert_files_table(
                -- single transactions are deleted or re-added by a reparse.
                (SELECT COUNT(*) FROM transactions t WHERE t.from_file_id = f.id) AS row_count,
                f.source_file,
+               f.bank_id,
                b.name AS bank_name,
                u.name || COALESCE(' ' || u.last_name, '') AS importer_name,
                f.importer_id
@@ -113,7 +251,28 @@ async fn insert_files_table(
         ORDER BY {order_by} {dir}, f.id DESC
         "#
     );
-    let files = sqlx::query_as::<_, ImportedFileView>(&sql).fetch_all(db).await?;
+    let mut files = sqlx::query_as::<_, ImportedFileView>(&sql).fetch_all(db).await?;
+
+    if let Some(s) = filter.search() {
+        let s = s.to_lowercase();
+        files.retain(|f| f.filename.to_lowercase().contains(&s));
+    }
+    let (year, month, from, to) = (filter.year(), filter.month(), filter.date_from(), filter.date_to());
+    files.retain(|f| filters::in_period(&f.imported_at, year, month, from, to));
+    let banks = filter.bank_ids();
+    if !banks.is_empty() {
+        files.retain(|f| banks.contains(&f.bank_id));
+    }
+    let importers = filter.importer_ids();
+    if !importers.is_empty() {
+        files.retain(|f| importers.contains(&f.importer_id));
+    }
+    if let Some(n) = filter.count_min() {
+        files.retain(|f| f.row_count >= n);
+    }
+    if let Some(n) = filter.count_max() {
+        files.retain(|f| f.row_count <= n);
+    }
 
     let columns: Vec<SortColumn> = FILE_COLUMNS
         .iter()
@@ -129,35 +288,83 @@ async fn insert_files_table(
         })
         .collect();
 
+    let filter_query = filter.filter_query();
     ctx.insert("files", &files);
     ctx.insert("columns", &columns);
-    ctx.insert("sort", sort);
-    ctx.insert("dir", dir);
+    ctx.insert("filter_query", &filter_query);
+    ctx.insert("full_query", &filter.full_query());
+    ctx.insert("filter_bar", &filter.filter_bar(&all_banks, &users));
     ctx.insert("current_user_id", &current_user_id);
     Ok(())
 }
 
 /// GET /imported-files — render the imported files list page.
-/// HTMX requests (sorting, SSE refresh) get only the table fragment.
+/// HTMX requests (search, filters, sorting, SSE refresh) get only the table fragment,
+/// which also updates the filter bar out-of-band.
 /// The synthetic "manual" row is excluded from the table (it's an implementation detail).
 pub async fn get_imported_files(
     State(state): State<AppState>,
     jar: SignedCookieJar,
     headers: HeaderMap,
-    Query(params): Query<FilesSortParams>,
+    Query(filter): Query<FilesFilter>,
 ) -> AppResult<Html<String>> {
     let current_user_id = super::get_user_id(&jar)?;
 
     if is_htmx(&headers) && !is_htmx_boost(&headers) {
         let mut ctx = tera::Context::new();
-        insert_files_table(&mut ctx, &state.db, &params, current_user_id).await?;
+        insert_files_table(&mut ctx, &state.db, &filter, current_user_id).await?;
+        ctx.insert("oob", &true);
         let html = state.tera.render("pages/imports/_table.html", &ctx)?;
         return Ok(Html(html));
     }
 
     let mut ctx = base_context(&jar, &state.db, "/imported-files").await?;
-    insert_files_table(&mut ctx, &state.db, &params, current_user_id).await?;
+    insert_files_table(&mut ctx, &state.db, &filter, current_user_id).await?;
+    ctx.insert("oob", &false);
+    ctx.insert("search", &filter.search().unwrap_or(""));
     let html = state.tera.render("pages/imports/imports.html", &ctx)?;
+    Ok(Html(html))
+}
+
+/// GET /imported-files/filters — the filters modal, pre-filled with the current view
+/// (the "Filtres" button sends the search form: search, filters and sort).
+pub async fn get_file_filters_modal(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Query(mut filter): Query<FilesFilter>,
+) -> AppResult<Html<String>> {
+    super::get_user_id(&jar)?;
+    let (banks, users) = banks_and_users(&state.db).await?;
+    filter.retain_known(&banks, &users);
+    let years: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT substr(imported_at, 1, 4) AS y FROM imported_files \
+         WHERE filename != 'manual' ORDER BY y DESC",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let (sort, _, dir) = filter.sort();
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("banks", &banks);
+    ctx.insert("users", &users);
+    ctx.insert("years", &years);
+    ctx.insert("months", &filters::MONTHS);
+    ctx.insert("search", &filter.search().unwrap_or(""));
+    ctx.insert("sort", sort);
+    ctx.insert("dir", dir);
+    let sort_choices: Vec<filters::SortChoice> =
+        FILE_COLUMNS.iter().map(|&(key, label, _, _)| filters::SortChoice { key, label }).collect();
+    ctx.insert("sort_choices", &sort_choices);
+    ctx.insert("year", &filter.year().unwrap_or(""));
+    ctx.insert("month", &filter.month());
+    ctx.insert("date_from", &filter.date_from().unwrap_or(""));
+    ctx.insert("date_to", &filter.date_to().unwrap_or(""));
+    ctx.insert("bank_ids", &filter.bank_ids());
+    ctx.insert("importer_ids", &filter.importer_ids());
+    ctx.insert("count_min", &filter.count_min().map(|n| n.to_string()).unwrap_or_default());
+    ctx.insert("count_max", &filter.count_max().map(|n| n.to_string()).unwrap_or_default());
+
+    let html = state.tera.render("modal/file_filters.html", &ctx)?;
     Ok(Html(html))
 }
 

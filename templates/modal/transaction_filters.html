@@ -1,0 +1,145 @@
+{#
+  Rendered alone by GET /transactions/filters into #modal-root, pre-filled with the
+  current view. "Appliquer" loads the table with this sort (modal/_sort_fields.html)
+  and these filters (the search travels in a hidden input, `data-keep`) and pushes the URL; the table fragment
+  updates the filter bar's chips out-of-band, and the modal closes once it answers.
+  "Effacer" only empties the filter fields here (not the sort) — nothing changes
+  until "Appliquer".
+  Multi-choice groups (.choice pills) submit their key once per checked box.
+  Only .filters-body scrolls: the header and the footer buttons always stay visible.
+#}
+<div class="modal-sheet card w-full" style="--modal-width: 36rem">
+  {% set modal_title = "Filtres et tri" %}{% set modal_icon = "fa-sliders" %}
+  {% set modal_subtitle = "Choisissez le tri et les filtres du tableau" %}
+  {% include "modal/_header.html" %}
+  <form class="filters-form"
+        hx-get="/transactions"
+        hx-target="#transactions-table"
+        hx-swap="outerHTML"
+        hx-sync="#transactions-card:replace"
+        hx-push-url="true"
+        hx-disabled-elt="find button[type=submit]"
+        hx-on::after-request="if (event.detail.successful) window.dispatchEvent(new CustomEvent('close-modal'))">
+    <input type="hidden" name="search" value="{{ search }}" data-keep>
+
+    <div class="filters-body">
+      {% include "modal/_sort_fields.html" %}
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-calendar"></i> Période</legend>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label" for="filter-year">Année</label>
+            <select id="filter-year" name="year" class="input">
+              <option value="all">Toutes</option>
+              {% for y in years %}
+              <option value="{{ y }}" {% if year == y %}selected{% endif %}>{{ y }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="label" for="filter-month">Mois</label>
+            <select id="filter-month" name="month" class="input">
+              <option value="">Tous</option>
+              {% for m in months %}
+              <option value="{{ loop.index }}" {% if month == loop.index %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="label" for="filter-date-from">Du</label>
+            <input id="filter-date-from" type="date" name="date_from" value="{{ date_from }}" class="input">
+          </div>
+          <div>
+            <label class="label" for="filter-date-to">Au</label>
+            <input id="filter-date-to" type="date" name="date_to" value="{{ date_to }}" class="input">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-coins"></i> Montant</legend>
+        <div class="choice-group mb-3">
+          <label class="choice"><input type="radio" name="kind" value="" {% if not kind %}checked{% endif %}><span>Tous</span></label>
+          <label class="choice"><input type="radio" name="kind" value="debit" {% if kind == "debit" %}checked{% endif %}><span>Dépenses</span></label>
+          <label class="choice"><input type="radio" name="kind" value="credit" {% if kind == "credit" %}checked{% endif %}><span>Revenus</span></label>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label" for="filter-amount-min">Minimum</label>
+            <input id="filter-amount-min" type="number" name="amount_min" value="{{ amount_min }}"
+                   min="0" step="0.01" inputmode="decimal" placeholder="0.00" class="input">
+          </div>
+          <div>
+            <label class="label" for="filter-amount-max">Maximum</label>
+            <input id="filter-amount-max" type="number" name="amount_max" value="{{ amount_max }}"
+                   min="0" step="0.01" inputmode="decimal" placeholder="—" class="input">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-tag"></i> Catégories</legend>
+        <div class="choice-group">
+          <label class="choice"><input type="checkbox" name="category" value="none" {% if category_none %}checked{% endif %}><span>Sans catégorie</span></label>
+          {% for c in categories %}
+          <label class="choice"><input type="checkbox" name="category" value="{{ c.id }}" {% if c.id in category_ids %}checked{% endif %}><span>{{ c.name }}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-user"></i> Propriétaire</legend>
+        <div class="choice-group">
+          {% for u in users %}
+          <label class="choice"><input type="checkbox" name="owner" value="{{ u.id }}" {% if u.id in owner_ids %}checked{% endif %}><span>{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="filters-section">
+        <legend class="filters-legend"><i class="fas fa-users"></i> Participants</legend>
+        <div class="choice-group">
+          {% for u in users %}
+          <label class="choice"><input type="checkbox" name="participant" value="{{ u.id }}" {% if u.id in participant_ids %}checked{% endif %}><span>{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <div class="grid sm:grid-cols-2 gap-x-6">
+        <fieldset class="filters-section">
+          <legend class="filters-legend"><i class="fas fa-circle-half-stroke"></i> Statut</legend>
+          <div class="choice-group">
+            {% for s in statuses %}
+            <label class="choice"><input type="checkbox" name="status" value="{{ s.0 }}" {% if s.0 in selected_statuses %}checked{% endif %}><span>{{ s.1 }}</span></label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <fieldset class="filters-section">
+          <legend class="filters-legend"><i class="fas fa-file"></i> Source</legend>
+          <div class="choice-group">
+            <label class="choice"><input type="radio" name="source" value="" {% if not source %}checked{% endif %}><span>Toutes</span></label>
+            <label class="choice"><input type="radio" name="source" value="manual" {% if source == "manual" %}checked{% endif %}><span>Manuelle</span></label>
+            <label class="choice"><input type="radio" name="source" value="pdf" {% if source == "pdf" %}checked{% endif %}><span>PDF</span></label>
+          </div>
+        </fieldset>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary filters-clear"
+              hx-on:click="this.form.querySelectorAll('input:not([data-keep]), select').forEach(el => {
+                if (el.type === 'checkbox') el.checked = false;
+                else if (el.type === 'radio') el.checked = el.value === '';
+                else if (el.tagName === 'SELECT') el.selectedIndex = 0;
+                else el.value = '';
+              })">
+        <i class="fas fa-eraser mr-1"></i> Effacer
+      </button>
+      <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+      <button type="submit" class="btn-primary">
+        <i class="fas fa-check mr-1"></i> Appliquer
+      </button>
+    </div>
+  </form>
+</div>

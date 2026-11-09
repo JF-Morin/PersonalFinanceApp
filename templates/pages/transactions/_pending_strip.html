@@ -1,0 +1,16 @@
+{#
+  Phones only (<640px, components.css): the "À compléter" count as a full-width strip
+  between the page header and the table, opening the carousel. Empty when nothing is
+  pending. Kept current by the pending badge: GET /transactions/pending-badge sends it
+  out-of-band (`oob`) with each refresh.
+#}
+<div id="pending-strip" class="pending-strip-slot"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% if pending_count > 0 %}
+  <button type="button" class="pending-strip"
+          hx-get="/transactions/pending" hx-target="#modal-root" hx-swap="innerHTML">
+    <i class="fas fa-tasks"></i>
+    <span class="pending-strip-text"><strong>{{ pending_count }}</strong> transaction{% if pending_count > 1 %}s{% endif %} à compléter</span>
+    <span class="pending-strip-go">Compléter <i class="fas fa-chevron-right"></i></span>
+  </button>
+  {% endif %}
+</div>

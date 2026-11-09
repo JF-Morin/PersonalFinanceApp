@@ -5,12 +5,35 @@
 <div class="page-header">
   <h1>Fichiers importés</h1>
   <div class="page-header-actions">
-    <button class="btn-primary" title="Importer"
+    {# The only action: keeps its label on phones too (.btn-compact) #}
+    <button class="btn-primary btn-compact" title="Importer"
             hx-get="/upload" hx-target="#modal-root" hx-swap="innerHTML">
       <i class="fas fa-file-upload mr-1"></i> <span class="btn-label">Importer</span>
     </button>
   </div>
 </div>
 
-{% include "pages/imports/_table.html" %}
+<div id="files-card" class="card filter-card overflow-hidden p-0">
+  <!--
+    Toolbar above the column headers: filter button + active filter chips on the left
+    (layout/_filter_bar.html, refreshed out-of-band with each table), search box on the
+    right. Typing (debounced) re-fetches the table with the hidden filter/sort inputs.
+  -->
+  <form id="file-filters" class="table-toolbar"
+        hx-get="/imported-files"
+        hx-trigger="input delay:300ms, submit"
+        hx-target="#files-table"
+        hx-swap="outerHTML"
+        hx-sync="#files-card:replace"
+        hx-push-url="true"
+        hx-disinherit="*">
+    {% include "layout/_filter_bar.html" %}
+    <label class="toolbar-search">
+      <i class="fas fa-magnifying-glass"></i>
+      <input type="search" name="search" value="{{ search }}" placeholder="Rechercher…"
+             aria-label="Rechercher un fichier" autocomplete="off">
+    </label>
+  </form>
+  {% include "pages/imports/_table.html" %}
+</div>
 {% endblock %}

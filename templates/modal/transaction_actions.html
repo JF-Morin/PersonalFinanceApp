@@ -1,0 +1,27 @@
+{#
+  Rendered alone by GET /transactions/actions into #modal-root: the phones' "Actions"
+  sheet, replacing the header buttons below 640px. A menu, so no footer: ✕, Esc or a
+  tap on the backdrop closes it. Ajouter / Importer load their modal in its place;
+  the CSV export downloads the table's current view (search form: filters + sort).
+#}
+<div class="modal-sheet card w-full" style="--modal-width: 24rem">
+  {% set modal_title = "Actions" %}{% set modal_icon = "fa-ellipsis" %}
+  {% include "modal/_header.html" %}
+  <div class="action-list">
+    <button type="button" class="action-item"
+            hx-get="/transactions/new" hx-target="#modal-root" hx-swap="innerHTML">
+      <span class="action-icon"><i class="fas fa-plus"></i></span>
+      <span class="action-text"><strong>Ajouter une transaction</strong><small>Saisie manuelle</small></span>
+    </button>
+    <button type="button" class="action-item"
+            hx-get="/upload" hx-target="#modal-root" hx-swap="innerHTML">
+      <span class="action-icon is-primary"><i class="fas fa-file-upload"></i></span>
+      <span class="action-text"><strong>Importer des relevés</strong><small>Fichiers PDF de la banque</small></span>
+    </button>
+    <button type="button" class="action-item"
+            @click="location.href = '/transactions/export.csv?' + new URLSearchParams(new FormData(document.getElementById('transaction-filters'))); close()">
+      <span class="action-icon"><i class="fas fa-file-csv"></i></span>
+      <span class="action-text"><strong>Exporter en CSV</strong><small>Le tableau avec ses filtres et son tri</small></span>
+    </button>
+  </div>
+</div>

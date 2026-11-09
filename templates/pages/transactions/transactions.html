@@ -4,66 +4,52 @@
 {% block content %}
 <div class="page-header">
   <h1>Transactions</h1>
+  {# Desktop/tablet: one button per action. Phones (<640px): one "Actions" button
+     (sheet: add, import, CSV) and the pending count as a strip under the header. #}
   <div class="page-header-actions">
     {% include "pages/transactions/_pending_badge.html" %}
-    <button class="btn-secondary" title="Ajouter"
+    <button class="btn-secondary no-phone" title="Ajouter"
             hx-get="/transactions/new" hx-target="#modal-root" hx-swap="innerHTML">
       <i class="fas fa-plus mr-1"></i> <span class="btn-label">Ajouter</span>
     </button>
-    <button class="btn-primary" title="Importer"
+    <button class="btn-secondary no-phone" title="Exporter en CSV (filtres appliqués)"
+            hx-on:click="location.href = '/transactions/export.csv?' + new URLSearchParams(new FormData(document.getElementById('transaction-filters')))">
+      <i class="fas fa-file-csv mr-1"></i> <span class="btn-label">CSV</span>
+    </button>
+    <button class="btn-primary no-phone" title="Importer"
             hx-get="/upload" hx-target="#modal-root" hx-swap="innerHTML">
       <i class="fas fa-file-upload mr-1"></i> <span class="btn-label">Importer</span>
     </button>
+    <button class="btn-secondary btn-compact phone-only" aria-label="Actions"
+            hx-get="/transactions/actions" hx-target="#modal-root" hx-swap="innerHTML">
+      <i class="fas fa-ellipsis"></i> <span>Actions</span>
+    </button>
   </div>
 </div>
+{% include "pages/transactions/_pending_strip.html" %}
 
-<!--
-  Filters: any change (typing is debounced) re-fetches the table fragment and puts
-  the filters in the URL. The current sort travels in hidden inputs (_state.html).
--->
-<form id="transaction-filters" class="card mb-4"
-      hx-get="/transactions"
-      hx-trigger="input delay:300ms, submit"
-      hx-target="#transactions-table"
-      hx-swap="outerHTML"
-      hx-push-url="true"
-      hx-disinherit="*">
-  <div class="flex flex-wrap gap-3 items-end">
-    <div>
-      <label class="label">Année</label>
-      <div class="flex gap-1 flex-wrap">
-        <label class="year-btn">
-          <input type="radio" name="year" value="" class="sr-only" {% if not year %}checked{% endif %}>
-          <span class="btn-secondary filter-ctrl">Toutes</span>
-        </label>
-        {% for y in years %}
-        <label class="year-btn">
-          <input type="radio" name="year" value="{{ y }}" class="sr-only" {% if year == y %}checked{% endif %}>
-          <span class="btn-secondary filter-ctrl">{{ y }}</span>
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-    <div class="flex-1 min-w-48">
-      <label class="label">Recherche</label>
-      <input type="search" name="search" value="{{ search }}"
-             placeholder="Opération…" class="input filter-ctrl" autocomplete="off">
-    </div>
-    <div>
-      <label class="label">Catégorie</label>
-      <select name="category_id" class="input filter-ctrl">
-        <option value="">Toutes</option>
-        {% for c in categories %}
-        <option value="{{ c.id }}" {% if category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <a href="/transactions" class="btn-secondary filter-ctrl" style="align-self:flex-end">Réinitialiser</a>
-    {% include "pages/transactions/_state.html" %}
-  </div>
-</form>
-
-<div class="card overflow-hidden p-0">
+<div id="transactions-card" class="card filter-card filter-card-wide overflow-hidden p-0">
+  <!--
+    Toolbar above the column headers: filter button + active filter chips on the left
+    (layout/_filter_bar.html, refreshed out-of-band with each table), search box on the right.
+    Typing (debounced) re-fetches the table fragment with the hidden filter/sort
+    inputs and puts everything in the URL. The CSV button exports this form's view.
+  -->
+  <form id="transaction-filters" class="table-toolbar"
+        hx-get="/transactions"
+        hx-trigger="input delay:300ms, submit"
+        hx-target="#transactions-table"
+        hx-swap="outerHTML"
+        hx-sync="#transactions-card:replace"
+        hx-push-url="true"
+        hx-disinherit="*">
+    {% include "layout/_filter_bar.html" %}
+    <label class="toolbar-search">
+      <i class="fas fa-magnifying-glass"></i>
+      <input type="search" name="search" value="{{ search }}" placeholder="Rechercher…"
+             aria-label="Rechercher une opération" autocomplete="off">
+    </label>
+  </form>
   <div class="rtable-wrap rtable-wide overflow-auto bg-gray-100 dark:bg-slate-900/60" data-fit-height>
     {% include "pages/transactions/_table.html" %}
   </div>

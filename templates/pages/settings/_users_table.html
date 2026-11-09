@@ -4,7 +4,8 @@
   added, removed or replaced one by one. Re-fetches itself on SSE `users` (any user
   was added, edited or deleted), on `users-changed` (this user's own add/edit/delete),
   and when the SSE connection (re)opens or the tab becomes visible again (phones).
-  Narrow screens: rows become cards (.rtable, components.css) — no header there.
+  Narrow screens: rows become cards (.rtable, components.css) — avatar tile, name +
+  meta line, buttons — no header there.
 #}
 <div id="users-table"
      hx-get="/settings/users"
@@ -13,10 +14,11 @@
      hx-sync="this:replace"
      hx-disinherit="*">
   {% if users %}
-  <div class="rtable-wrap overflow-x-auto rounded-xl border border-gray-200 dark:border-slate-600 mb-5">
-    <table class="rtable w-full">
+  <div class="rtable-wrap overflow-x-auto rounded-xl border border-gray-200 dark:border-slate-600 mb-5 bg-gray-100 dark:bg-slate-900/60">
+    <table class="rtable w-full bg-white dark:bg-slate-800">
       <thead class="rt-nohead bg-gray-50 dark:bg-slate-700/60">
         <tr class="border-b border-gray-200 dark:border-slate-600">
+          <th class="table-header" style="width:1%"></th>
           <th class="table-header">Prénom</th>
           <th class="table-header">Nom</th>
           <th class="table-header">Banque</th>
@@ -28,6 +30,9 @@
       <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
         {% for u in users %}
         <tr class="rt-row">
+          <td class="table-cell rt-lead">
+            <span class="rt-tile is-avatar">{{ u.name | truncate(length=1, end="") | upper }}{% if u.last_name %}{{ u.last_name | truncate(length=1, end="") | upper }}{% endif %}</span>
+          </td>
           <td class="table-cell rt-main font-medium text-gray-900 dark:text-gray-100">{{ u.name }}<span class="m-only-inline">{% if u.last_name %} {{ u.last_name }}{% endif %}</span>{% if u.is_admin %}
             <span class="ml-1.5 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide
                          text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/40 px-1.5 py-0.5 rounded-full"
@@ -35,9 +40,9 @@
               <i class="fas fa-shield-halved"></i> Admin
             </span>{% endif %}
             <span class="m-only rt-meta font-normal">
-              <span><i class="fas fa-building-columns"></i> {% for b in banks %}{% if b.id == u.bank_id %}{{ b.name }}{% endif %}{% endfor %}{% if not u.bank_id %}Aucune banque{% endif %}</span>
-              <span>{% if u.password_hash %}<i class="fas fa-lock text-green-500"></i> Mot de passe défini{% else %}<i class="fas fa-lock-open"></i> Aucun mot de passe{% endif %}</span>
-              <span><i class="fas fa-clock"></i> {% if u.last_login %}{{ u.last_login | truncate(length=16, end="") }}{% else %}Jamais connecté{% endif %}</span>
+              <span><i class="fas fa-building-columns"></i>{% for b in banks %}{% if b.id == u.bank_id %}{{ b.name }}{% endif %}{% endfor %}{% if not u.bank_id %}Aucune banque{% endif %}</span>
+              <span>{% if u.password_hash %}<i class="fas fa-lock text-green-500"></i>Mot de passe défini{% else %}<i class="fas fa-lock-open"></i>Aucun mot de passe{% endif %}</span>
+              <span><i class="fas fa-clock"></i>{% if u.last_login %}{{ u.last_login | truncate(length=16, end="") }}{% else %}Jamais connecté{% endif %}</span>
             </span></td>
           <td class="table-cell rt-hide text-gray-600 dark:text-gray-300">{{ u.last_name | default(value="—") }}</td>
           <td class="table-cell rt-hide text-gray-500 dark:text-gray-400">

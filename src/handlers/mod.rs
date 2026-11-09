@@ -6,6 +6,7 @@
 ///   2. Call `base_context` to get a Tera context pre-populated with `current_user` and `theme`.
 ///   3. Add page-specific data to the context, then call `state.tera.render(...)`.
 pub mod auth;
+pub mod filters;
 pub mod home;
 pub mod imports;
 pub mod settings;

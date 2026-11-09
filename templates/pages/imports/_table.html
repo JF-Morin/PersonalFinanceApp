@@ -1,93 +1,103 @@
 {#
-  Rendered alone by GET /imported-files for HTMX requests (sort, refresh). Always
-  swapped as a whole — rows are never added, removed or replaced one by one.
-  Re-fetches itself, keeping the current sort, on SSE `imports` (any user imported,
-  reparsed or deleted a file), SSE `transactions` (keeps the per-file transaction
-  counts current) and `files-changed` (this user's own delete/reparse/import), plus
-  when the SSE connection (re)opens or the tab becomes visible again (phones).
-  hx-sync="this:replace" keeps only the latest refresh when several arrive together.
-  Narrow screens: rows become cards and the headers sort chips (.rtable, components.css).
+  Rendered alone by GET /imported-files for HTMX requests (search, filters, sort,
+  refresh). Always swapped as a whole — rows are never added, removed or replaced one
+  by one. Re-fetches itself, keeping the current search/filters/sort, on SSE `imports`
+  (any user imported, reparsed or deleted a file), SSE `transactions` (keeps the
+  per-file transaction counts current) and `files-changed` (this user's own
+  delete/reparse/import), plus when the SSE connection (re)opens or the tab becomes
+  visible again (phones). Sends the filter bar out-of-band (`oob`).
+  One `hx-sync` group (the table card, #files-card) for every request that reloads the
+  table: this refresh is dropped while another one is running (that answer is at least
+  as fresh), and the user's actions (search, filters, sort, chips) cancel a running
+  refresh — so an older view can never land after a newer one.
+  Narrow screens: rows become cards and the column headers are hidden (.rtable,
+  components.css); the sort is shown by the filter bar's sort chip.
 #}
-<div id="files-table" class="card overflow-hidden p-0"
-     hx-get="/imported-files?sort={{ sort }}&dir={{ dir }}"
+{% set base = filter_query %}{% if base %}{% set base = base ~ "&" %}{% endif %}
+<div id="files-table" class="rtable-wrap overflow-auto bg-gray-100 dark:bg-slate-900/60" data-fit-height
+     hx-get="/imported-files?{{ full_query }}"
      hx-trigger="sse:imports, sse:transactions, files-changed from:body, htmx:sseOpen from:body, visibilitychange[document.visibilityState=='visible'] from:document"
      hx-swap="outerHTML"
-     hx-sync="this:replace"
+     hx-sync="#files-card:drop"
      hx-disinherit="*">
-  <div class="rtable-wrap overflow-auto bg-gray-100 dark:bg-slate-900/60" data-fit-height>
-    <table class="rtable w-full bg-white dark:bg-slate-800">
-      <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600 sticky top-0 z-10">
-        <tr>
-          {% for c in columns %}
-          <th class="table-header th-sort{% if c.dir %} is-sorted{% endif %}" style="min-width:{{ c.min_width }}">
-            <span class="flex items-center gap-1 cursor-pointer select-none"
-                  hx-get="/imported-files?sort={{ c.key }}&dir={{ c.next_dir }}"
-                  hx-target="#files-table"
-                  hx-swap="outerHTML"
-                  hx-push-url="true">
-              {{ c.label }}
-              {% if c.dir == "asc" %}<i class="fas fa-sort-up text-indigo-500 text-xs"></i>
-              {% elif c.dir == "desc" %}<i class="fas fa-sort-down text-indigo-500 text-xs"></i>
-              {% else %}<i class="fas fa-sort text-gray-400 text-xs"></i>{% endif %}
-            </span>
-          </th>
-          {% endfor %}
-          <th class="table-header" style="width:1%"></th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
-        {% if files %}
-        {% for f in files %}
-        <tr class="rt-row hover:bg-gray-50 dark:hover:bg-slate-700">
-          <td class="table-cell rt-main">
-            <span class="rt-filename"><i class="fas fa-file-pdf text-red-400"></i><span>{{ f.filename }}</span></span>
-            <span class="m-only rt-meta">
-              <span><i class="fas fa-building-columns"></i> {{ f.bank_name }}</span>
-              <span><i class="fas fa-calendar-day"></i> {{ f.imported_at }}</span>
-              <span><i class="fas fa-list"></i> {{ f.row_count }} transaction(s)</span>
-              <span><i class="fas fa-user"></i> {{ f.importer_name }}</span>
-            </span>
-          </td>
-          <td class="table-cell rt-hide text-gray-500 whitespace-nowrap">{{ f.bank_name }}</td>
-          <td class="table-cell rt-hide text-gray-500 whitespace-nowrap">{{ f.imported_at }}</td>
-          <td class="table-cell rt-hide">{{ f.row_count }}</td>
-          <td class="table-cell rt-hide text-gray-500">{{ f.importer_name }}</td>
-          <td class="table-cell rt-act text-right">
-            <div class="flex items-center gap-1 justify-end">
-              {# Reparse and delete: only for the user who imported the file. #}
-              {% if f.importer_id == current_user_id %}
-              <button
-                class="row-action w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent
-                       text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
-                hx-get="/imported-files/{{ f.id }}/reparse"
-                hx-target="#modal-root"
-                hx-swap="innerHTML"
-                title="Réanalyser — rechercher les transactions manquantes">
-                <i class="fas fa-rotate text-xs"></i>
-              </button>
-              <button
-                class="row-action w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent
-                       text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                hx-get="/imported-files/{{ f.id }}/delete"
-                hx-target="#modal-root"
-                hx-swap="innerHTML"
-                title="Supprimer ce fichier">
-                <i class="fas fa-trash-can text-xs"></i>
-              </button>
-              {% endif %}
-            </div>
-          </td>
-        </tr>
+  <table class="rtable w-full bg-white dark:bg-slate-800">
+    <thead class="bg-gray-50 dark:bg-slate-700 border-b dark:border-slate-600 sticky top-0 z-10">
+      <tr>
+        <th class="table-header" style="width:1%"></th>
+        {% for c in columns %}
+        <th class="table-header th-sort{% if c.dir %} is-sorted{% endif %}" style="min-width:{{ c.min_width }}">
+          <span class="flex items-center gap-1 cursor-pointer select-none"
+                hx-get="/imported-files?{{ base }}sort={{ c.key }}&dir={{ c.next_dir }}"
+                hx-target="#files-table"
+                hx-swap="outerHTML"
+                hx-sync="#files-card:replace"
+                hx-push-url="true">
+            {{ c.label }}
+            {% if c.dir == "asc" %}<i class="fas fa-sort-up text-indigo-500 text-xs"></i>
+            {% elif c.dir == "desc" %}<i class="fas fa-sort-down text-indigo-500 text-xs"></i>
+            {% else %}<i class="fas fa-sort text-gray-400 text-xs"></i>{% endif %}
+          </span>
+        </th>
         {% endfor %}
-        {% else %}
-        <tr>
-          <td colspan="6" class="text-center py-12 text-gray-400">
-            <i class="fas fa-inbox text-4xl mb-3 block"></i>
-            Aucun fichier importé.
-          </td>
-        </tr>
-        {% endif %}
-      </tbody>
-    </table>
-  </div>
+        <th class="table-header" style="width:1%"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+      {% if files %}
+      {% for f in files %}
+      <tr class="rt-row hover:bg-gray-50 dark:hover:bg-slate-700">
+        <td class="table-cell rt-lead">
+          <span class="rt-tile is-pdf"><i class="fas fa-file-pdf"></i></span>
+        </td>
+        <td class="table-cell rt-main">
+          <span class="rt-filename" title="{{ f.filename }}">{{ f.filename }}</span>
+          <span class="m-only rt-meta">
+            <span><i class="fas fa-building-columns"></i>{{ f.bank_name }}</span>
+            <span><i class="fas fa-calendar"></i>{{ f.imported_at | truncate(length=16, end="") }}</span>
+            <span><i class="fas fa-list"></i>{{ f.row_count }} transaction{% if f.row_count > 1 %}s{% endif %}</span>
+            <span><i class="fas fa-user"></i>{{ f.importer_name }}</span>
+          </span>
+        </td>
+        <td class="table-cell rt-hide text-gray-500 whitespace-nowrap">{{ f.bank_name }}</td>
+        <td class="table-cell rt-hide text-gray-500 whitespace-nowrap">{{ f.imported_at }}</td>
+        <td class="table-cell rt-hide">{{ f.row_count }}</td>
+        <td class="table-cell rt-hide text-gray-500">{{ f.importer_name }}</td>
+        <td class="table-cell rt-act text-right">
+          <div class="flex items-center gap-1 justify-end">
+            {# Reparse and delete: only for the user who imported the file. #}
+            {% if f.importer_id == current_user_id %}
+            <button
+              class="row-action w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent
+                     text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+              hx-get="/imported-files/{{ f.id }}/reparse"
+              hx-target="#modal-root"
+              hx-swap="innerHTML"
+              title="Réanalyser — rechercher les transactions manquantes">
+              <i class="fas fa-rotate text-xs"></i>
+            </button>
+            <button
+              class="row-action w-8 h-8 flex items-center justify-center rounded-full border-none cursor-pointer bg-transparent
+                     text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              hx-get="/imported-files/{{ f.id }}/delete"
+              hx-target="#modal-root"
+              hx-swap="innerHTML"
+              title="Supprimer ce fichier">
+              <i class="fas fa-trash-can text-xs"></i>
+            </button>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+      {% else %}
+      <tr>
+        <td colspan="7" class="text-center py-12 text-gray-400">
+          <i class="fas fa-inbox text-4xl mb-3 block"></i>
+          {% if filter_query %}Aucun fichier ne correspond à ces filtres.{% else %}Aucun fichier importé.{% endif %}
+        </td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
 </div>
+{% if oob %}{% include "layout/_filter_bar.html" %}{% endif %}

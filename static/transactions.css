@@ -53,20 +53,6 @@
 }
 .dark .share-pill-pct { color: #a5b4fc; }
 
-/* ── Year filter (radio buttons styled as buttons) ─────────── */
-.year-btn { cursor: pointer; }
-.year-btn input:checked + span { background-color: #4f46e5 !important; color: #fff !important; }
-.year-btn input:focus-visible + span { outline: 2px solid #4f46e5; outline-offset: 2px; }
-
-/* ── Filter bar controls ──────────────────────────────────── */
-.filter-ctrl {
-  height: 2.5rem;
-  padding: 0 1rem;
-  font-size: 1.05rem;
-  box-sizing: border-box;
-  line-height: 1;
-}
-
 /* ── Share inline list ────────────────────────────────────── */
 .share-inline-list { display: flex; flex-direction: column; gap: 0.5rem; max-width: 20rem; }
 .share-inline-row  { display: flex; align-items: center; gap: 0.75rem; }

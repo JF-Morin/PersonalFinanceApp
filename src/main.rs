@@ -149,6 +149,8 @@ async fn main() -> anyhow::Result<()> {
         // ── Transactions ──────────────────────────────────────────────────────
         .route("/transactions",               get(handlers::transactions::get_transactions))
         .route("/transactions/export.csv",    get(handlers::transactions::get_export_csv))
+        .route("/transactions/filters",       get(handlers::transactions::get_filters_modal))
+        .route("/transactions/actions",       get(handlers::transactions::get_actions_modal))
         .route("/transactions/new",           get(handlers::transactions::get_manual_modal))
         .route("/transactions/manual",        post(handlers::transactions::post_manual_transaction))
         .route("/transactions/pending-badge", get(handlers::transactions::get_pending_badge))
@@ -160,6 +162,7 @@ async fn main() -> anyhow::Result<()> {
                                              .post(handlers::transactions::post_delete_transaction))
         // ── Imports ───────────────────────────────────────────────────────────
         .route("/imported-files",          get(handlers::imports::get_imported_files))
+        .route("/imported-files/filters",  get(handlers::imports::get_file_filters_modal))
         .route("/imported-files/:id/delete",  get(handlers::imports::get_delete_file_modal)
                                              .post(handlers::imports::post_delete_imported_file))
         .route("/imported-files/:id/reparse", get(handlers::imports::get_reparse_file_modal)

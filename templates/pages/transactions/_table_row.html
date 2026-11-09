@@ -1,22 +1,23 @@
 {# One transaction. As a table row on wide screens; as a card on narrow ones (.rtable in
-   components.css): operation + .m-only meta line (source, date, category, owner, notes)
-   on the left, amount on the right, shares and actions underneath. #}
+   components.css): source tile on the left, operation + .m-only meta line (status,
+   date, category, owner) and note in the middle, amount on the right, shares and
+   actions underneath. #}
 <tr id="transaction-row-{{ t.id }}"
     class="rt-row{% if t.status_name != 'complete' %} is-pending{% endif %} hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
-  <td class="table-cell rt-hide text-center" title="{% if t.is_manual %}Entrée manuelle{% else %}Importé PDF{% endif %}">
-    {% if t.is_manual %}
-    <i class="fas fa-file-pen text-gray-400 text-sm"></i>
-    {% else %}
-    <i class="fas fa-file-pdf text-red-400 text-sm"></i>
-    {% endif %}
+  <td class="table-cell rt-lead text-center" title="{% if t.is_manual %}Entrée manuelle{% else %}Importé PDF{% endif %}">
+    <span class="rt-tile{% if not t.is_manual %} is-pdf{% endif %}">
+      <i class="fas {% if t.is_manual %}fa-file-pen{% else %}fa-file-pdf{% endif %}"></i>
+    </span>
   </td>
   <td class="table-cell rt-hide text-gray-500 whitespace-nowrap border-l-4 {% if t.status_name == 'complete' %}border-transparent{% else %}border-amber-400{% endif %}">{{ t.date }}</td>
   <td class="table-cell rt-main">
     <span class="rt-clamp" title="{{ t.operation }}">{{ t.operation }}</span>
     <span class="m-only rt-meta">
-      <span>{% if t.is_manual %}<i class="fas fa-file-pen"></i>{% else %}<i class="fas fa-file-pdf text-red-400"></i>{% endif %} {{ t.date }}</span>
-      <span>{% if t.category_name %}{{ t.category_name }}{% else %}<span style="color:#f59e0b">Sans catégorie</span>{% endif %}</span>
-      <span><i class="fas fa-user"></i> {{ t.owner_name }}</span>
+      {% if t.status_name == "broken" %}<span class="rt-badge is-danger">Échec</span>
+      {% elif t.status_name != "complete" %}<span class="rt-badge">À compléter</span>{% endif %}
+      <span><i class="fas fa-calendar"></i>{{ t.date }}</span>
+      <span>{% if t.category_name %}<i class="fas fa-tag"></i>{{ t.category_name }}{% else %}<i class="fas fa-tag" style="color:#f59e0b"></i><span style="color:#f59e0b">Sans catégorie</span>{% endif %}</span>
+      <span><i class="fas fa-user"></i>{{ t.owner_name }}</span>
     </span>
     {% if t.notes %}<span class="m-only rt-note"><i class="fas fa-note-sticky"></i> {{ t.notes }}</span>{% endif %}
   </td>
@@ -35,7 +36,8 @@
       {% endfor %}
     </div>
     {% else %}
-    <span style="color:#f59e0b">(N/A)</span>
+    <span class="w-only" style="color:#f59e0b">(N/A)</span>
+    <span class="m-only-inline"><span class="rt-empty"><i class="fas fa-user-plus"></i> Aucun participant</span></span>
     {% endif %}
   </td>
   <td class="table-cell rt-hide text-gray-500">
