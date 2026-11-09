@@ -53,8 +53,77 @@
 }
 .dark .share-pill-pct { color: #a5b4fc; }
 
-/* ── Share inline list ────────────────────────────────────── */
-.share-inline-list { display: flex; flex-direction: column; gap: 0.5rem; max-width: 20rem; }
+/* ── Shares field (modal/_shares_field.html) ────────────────
+   Presets (one tap), "Autre…" → slider (two people) or person chips (more), "Ajuster"
+   → exact number inputs; plus the "Dernier partage" suggestion for the category. */
+.share-presets { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.share-preset {
+  display: inline-flex; align-items: center; height: 2.25rem; padding: 0 0.9rem;
+  border-radius: 9999px; border: 1px solid #d1d5db; background: #fff; color: #374151;
+  font-size: 0.875rem; font-weight: 500; cursor: pointer; white-space: nowrap;
+  transition: background-color 120ms, border-color 120ms, color 120ms;
+}
+.share-preset:hover { border-color: #a5b4fc; }
+.share-preset.is-active { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+.share-preset:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
+.dark .share-preset { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+.dark .share-preset.is-active { background: #6366f1; border-color: #6366f1; color: #fff; }
+
+.share-hint {
+  width: 100%; display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem; border-radius: 0.75rem; cursor: pointer; text-align: left;
+  border: 1px dashed #a5b4fc; background: #eef2ff; color: #3730a3; font-size: 0.8125rem;
+}
+.share-hint > i { color: #6366f1; }
+.share-hint > .min-w-0 { flex: 1; display: flex; flex-direction: column; }
+.share-hint-title { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.8; }
+.share-hint-split { font-weight: 600; }
+.share-hint-apply { font-weight: 600; color: #4f46e5; white-space: nowrap; }
+.dark .share-hint { border-color: rgba(129,140,248,0.5); background: rgba(99,102,241,0.12); color: #c7d2fe; }
+.dark .share-hint-apply { color: #a5b4fc; }
+/* The current split already is the last one: same size, quieter look, not clickable. */
+.share-hint.is-applied { cursor: default; border-style: solid; border-color: #e0e7ff; background: #f8fafc; color: #475569; }
+.share-hint.is-applied > i, .share-hint.is-applied .share-hint-apply { color: #16a34a; }
+.dark .share-hint.is-applied { border-color: #334155; background: rgba(15,23,42,0.4); color: #cbd5e1; }
+.dark .share-hint.is-applied > i, .dark .share-hint.is-applied .share-hint-apply { color: #4ade80; }
+
+.share-custom {
+  margin-top: 0.625rem; padding: 0.75rem; border-radius: 0.875rem;
+  background: #f8fafc; border: 1px solid #e5e7eb;
+}
+.dark .share-custom { background: rgba(15,23,42,0.4); border-color: #334155; }
+.share-slider { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; }
+.share-slider-side { display: flex; flex-direction: column; min-width: 3.5rem; font-size: 0.8125rem; line-height: 1.25; }
+.share-slider-side strong { font-weight: 600; }
+.share-slider-side > span { font-family: 'JetBrains Mono', monospace; font-size: 0.9375rem; font-weight: 600; color: #4f46e5; }
+.share-slider-side.is-right { text-align: right; }
+.share-slider-side.is-right > span { color: #64748b; }
+.dark .share-slider-side > span { color: #a5b4fc; }
+.dark .share-slider-side.is-right > span { color: #94a3b8; }
+/* Range: the filled part (my share) in indigo, the rest grey */
+.share-range {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 0.5rem; border-radius: 9999px;
+  /* Neutral track with a mark at 50 %: the thumb's side shows who pays more. */
+  background: linear-gradient(to right, transparent calc(50% - 1px), #94a3b8 calc(50% - 1px), #94a3b8 calc(50% + 1px), transparent calc(50% + 1px)), #e2e8f0;
+  cursor: pointer;
+}
+.dark .share-range { background: linear-gradient(to right, transparent calc(50% - 1px), #64748b calc(50% - 1px), #64748b calc(50% + 1px), transparent calc(50% + 1px)), #334155; }
+.share-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 1.5rem; height: 1.5rem; border-radius: 9999px;
+  background: #fff; border: 2px solid #4f46e5; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+.share-range::-moz-range-thumb {
+  width: 1.25rem; height: 1.25rem; border-radius: 9999px;
+  background: #fff; border: 2px solid #4f46e5; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+.share-range:focus-visible { outline: 2px solid #4f46e5; outline-offset: 4px; }
+.share-adjust {
+  margin-top: 0.625rem; padding: 0; border: none; background: none; cursor: pointer;
+  font-size: 0.8125rem; color: #4f46e5; text-decoration: underline; text-underline-offset: 2px;
+}
+.dark .share-adjust { color: #a5b4fc; }
+
+.share-inline-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .share-inline-row  { display: flex; align-items: center; gap: 0.75rem; }
 .share-inline-label { flex: 1; min-width: 0; }
 .share-inline-input { width: 7rem; text-align: right; flex-shrink: 0; }

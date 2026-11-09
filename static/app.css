@@ -111,6 +111,7 @@
    indicator inset by --bn-pad on every side, its radius = bar radius − --bn-pad
    (concentric corners). Items have no gap between them, so the indicator's margin
    is the bar padding all around. */
+.bottom-nav-shield { display: none; }
 .bottom-nav {
   --bn-pad: 0.375rem;
   --bn-radius: 1.5rem;
@@ -203,6 +204,11 @@
 @media (max-width: 1023px) {
   .bottom-nav { display: flex; }
   .top-bar    { display: flex; }
+  /* Transparent tap shield over the bottom-nav zone (base.html), under the nav */
+  .bottom-nav-shield {
+    display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    height: calc(var(--bottomnav-h) + var(--bottomnav-gap) + env(safe-area-inset-bottom, 0px));
+  }
 
   /* Content padding accounts for the top bar and the floating bottom nav */
   .content-pad {
@@ -318,6 +324,13 @@
   flex-direction: column;
 }
 [data-fit-height] { flex: 1 1 0; min-height: 0; }
+/* Phones: the scrolling list runs down to the bottom of the screen, behind the
+   floating nav (visible through the transparent zone around it, taps blocked by
+   .bottom-nav-shield); the list ends with room to scroll its last item above the nav
+   (components.css, .filter-card tbody). */
+@media (max-width: 639px) {
+  .content-pad:has([data-fit-height]) { padding-bottom: 0 !important; }
+}
 
 /* ── Modal layer (#modal-root in layout/shell.html) ───────────
    Visible only while a modal is swapped in; the page behind doesn't scroll. */

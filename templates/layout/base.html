@@ -60,6 +60,10 @@
 <!-- Bottom navigation (phones only, shown via app.css): a floating rounded bar. The
      active page sits on .bottom-nav-indicator; navigating swaps the page inside a view
      transition (transition:true), which slides the indicator to the new item (app.css). -->
+<!-- Phones/tablets: a transparent strip over the bottom-nav zone. Content scrolls
+     visibly behind it, but taps there land on the strip (nothing happens) instead of
+     on the rows underneath; the nav itself is painted above it and stays clickable. -->
+<div class="bottom-nav-shield" aria-hidden="true"></div>
 <nav class="bottom-nav" aria-label="Navigation principale"
      hx-boost="true" hx-swap="innerHTML transition:true">
   <a href="/" class="bottom-nav-item{% if active_nav == "/" %} active{% endif %}"{% if active_nav == "/" %} aria-current="page"{% endif %}>

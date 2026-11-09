@@ -1,48 +1,179 @@
 {#
-  Participants share inputs (current user first, then the others).
-  Expects `users`, `current_user_id` and `shares_init` ({"<user_id>": share}) in the
-  context. The Alpine state shows the live total, caps each input so the total
-  stays ≤ 100 %, and submits everything as one `shares_json` field with the
-  enclosing form. The server checks the limit again (handlers::transactions::parse_shares).
+  Participants (shares) input, used by the manual, edit and carousel forms.
+  Expects `share_users` (current user first), `shares_init` ({"<user_id>": share}) and
+  `split_hints` ({"<category_id>": {"<user_id>": share}}: the user's last split per
+  category) — see insert_form_options in handlers/transactions.rs.
+
+  - Presets cover the usual splits in one tap: two people → "Moi 100 %", "50 / 50",
+    "<other> 100 %"; three or more → "Moi seul", "Partagé également".
+  - "Autre…" opens the custom split: with two people one slider (5 % steps) sets both
+    shares, so the total is always 100 % — the thumb moves towards whoever pays more
+    (100 % for me = thumb on my side, the left; its value is the other person's share); with more, a chip per person (the selected
+    ones share equally). "Ajuster" shows a number input per person for exact values.
+  - "Dernier partage": when the form's category has a last split, a suggestion applies
+    it in one tap (nothing is applied by itself). It stays shown while the split matches
+    it (marked "Appliqué") so the field below never jumps while the slider moves.
+  Everything is submitted as one `shares_json` field with the enclosing form; the
+  server checks the total again (handlers::transactions::parse_shares).
 #}
-<div x-data="{
+<div class="shares-field" x-data="{
+       users: {{ share_users | json_encode() }},
        shares: {{ shares_init | json_encode() }},
+       hints: {{ split_hints | json_encode() }},
+       category: '', categoryName: '',
+       custom: false, adjust: false,
+       init() {
+         const select = this.$el.closest('form')?.querySelector('[name=category_id]');
+         if (select) {
+           const read = () => { this.category = select.value; this.categoryName = select.selectedOptions[0]?.text.trim() || '' };
+           read();
+           select.addEventListener('change', read);
+         }
+         // A saved split that no preset matches: open the custom part directly.
+         if (this.total > 0 && !this.activePreset) {
+           this.custom = true;
+           this.adjust = !(this.users.length === 2 && this.onSliderSteps);
+         }
+       },
        value(id) { return parseFloat(this.shares[id]) || 0 },
-       get total() { return Object.keys(this.shares).reduce((sum, id) => sum + this.value(id), 0) },
-       max(id) { return Math.max(0, Math.round((100 - this.total + this.value(id)) * 10) / 10) },
+       round(x) { return Math.round(x * 100) / 100 },
+       get total() { return this.users.reduce((sum, u) => sum + this.value(u.id), 0) },
+       get me() { return this.users[0] },
+       get other() { return this.users[1] },
+       set(split) {
+         this.shares = Object.fromEntries(this.users.map(u => [String(u.id), split[u.id] || 0]));
+       },
+       same(split) { return this.users.every(u => Math.abs(this.value(u.id) - (parseFloat(split[u.id]) || 0)) < 0.01) },
+       /* Equal shares between `ids`; the rounding remainder goes to the first one. */
+       equal(ids) {
+         if (!ids.length) return {};
+         const each = Math.floor(10000 / ids.length) / 100;
+         const split = Object.fromEntries(ids.map(id => [id, each]));
+         split[ids[0]] = this.round(100 - each * (ids.length - 1));
+         return split;
+       },
+       get presets() {
+         const me = this.me, other = this.other;
+         if (this.users.length === 1) return [{ label: 'Moi 100 %', split: { [me.id]: 100 } }];
+         if (this.users.length === 2) return [
+           { label: 'Moi 100 %', split: { [me.id]: 100 } },
+           { label: '50 / 50', split: { [me.id]: 50, [other.id]: 50 } },
+           { label: other.name + ' 100 %', split: { [other.id]: 100 } },
+         ];
+         return [
+           { label: 'Moi seul', split: { [me.id]: 100 } },
+           { label: 'Partagé également', split: this.equal(this.users.map(u => u.id)) },
+         ];
+       },
+       get activePreset() { return this.total > 0 ? this.presets.find(p => this.same(p.split)) : undefined },
+       pick(preset) { this.set(preset.split); this.custom = false; this.adjust = false },
+       openCustom() {
+         this.custom = true;
+         // Start the slider from the middle when nothing is set yet.
+         if (this.total === 0 && this.users.length === 2) this.set({ [this.me.id]: 50, [this.other.id]: 50 });
+       },
+       /* Two people: the slider's value is the other person's share (so the thumb sits
+          on the side of whoever pays more); I get the rest. */
+       get mine() { return this.value(this.me.id) },
+       get onSliderSteps() { return Math.abs(this.total - 100) < 0.01 && this.mine % 5 === 0 },
+       slide(v) { v = Number(v); this.set({ [this.me.id]: 100 - v, [this.other.id]: v }) },
+       /* Three or more: who is in, sharing equally. */
+       included(id) { return this.value(id) > 0 },
+       toggle(id) {
+         const ids = this.users.map(u => u.id).filter(u => u === id ? !this.included(u) : this.included(u));
+         this.set(this.equal(ids));
+       },
+       describe(split) {
+         return this.users.filter(u => (parseFloat(split[u.id]) || 0) > 0)
+           .map(u => u.name + ' ' + this.round(parseFloat(split[u.id])) + ' %').join(' · ');
+       },
+       get hint() { return this.hints[this.category] || null },
+       get hintApplied() { return !!this.hint && this.same(this.hint) },
+       max(id) { return Math.max(0, this.round(100 - this.total + this.value(id))) },
        get json() {
-         return JSON.stringify(Object.keys(this.shares)
-           .filter(id => this.value(id) > 0)
-           .map(id => ({ user_id: Number(id), share: this.value(id) })))
+         return JSON.stringify(this.users
+           .filter(u => this.value(u.id) > 0)
+           .map(u => ({ user_id: u.id, share: this.value(u.id) })))
        }
      }">
   <label class="label">
     Participants
     <span class="text-xs font-normal ml-1"
           :class="Math.abs(total - 100) < 0.01 ? 'text-green-600' : 'text-amber-500'"
-          x-text="'(' + Math.round(total * 10) / 10 + '%)'"></span>
+          x-text="'(' + round(total) + ' %)'"></span>
   </label>
   <input type="hidden" name="shares_json" :value="json">
-  <div class="share-inline-list">
-    {% for u in users %}{% if u.id == current_user_id %}
-    <div class="share-inline-row">
-      <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %} <span class="text-xs text-indigo-500 font-medium">(vous)</span></span>
-      <input type="number" min="0" step="0.5" placeholder="0"
-             class="input text-sm share-inline-input"
-             x-model="shares['{{ u.id }}']" :max="max('{{ u.id }}')"
-             @keydown.enter.prevent="$el.blur()">
-    </div>
-    {% endif %}{% endfor %}
-    {% for u in users %}{% if u.id != current_user_id %}
-    <div class="share-inline-row">
-      <span class="share-inline-label">{{ u.name }}{% if u.last_name %} {{ u.last_name }}{% endif %}</span>
-      <input type="number" min="0" step="0.5" placeholder="0"
-             class="input text-sm share-inline-input"
-             x-model="shares['{{ u.id }}']" :max="max('{{ u.id }}')"
-             @keydown.enter.prevent="$el.blur()">
-    </div>
-    {% endif %}{% endfor %}
+
+  {# Suggestion: the last split used for this category #}
+  <button type="button" class="share-hint" :class="{ 'is-applied': hintApplied }" x-show="hint" x-cloak
+          :disabled="hintApplied" @click="set(hint); custom = false; adjust = false">
+    <i class="fas fa-clock-rotate-left"></i>
+    <span class="min-w-0">
+      <span class="share-hint-title">Dernier partage<template x-if="categoryName"><span x-text="' · ' + categoryName"></span></template></span>
+      <span class="share-hint-split" x-text="hint ? describe(hint) : ''"></span>
+    </span>
+    <span class="share-hint-apply" x-show="!hintApplied">Appliquer</span>
+    <span class="share-hint-apply" x-show="hintApplied" x-cloak><i class="fas fa-check mr-1"></i>Appliqué</span>
+  </button>
+
+  {# Presets + "Autre…" #}
+  <div class="share-presets">
+    <template x-for="p in presets" :key="p.label">
+      <button type="button" class="share-preset" :class="{ 'is-active': !custom && activePreset?.label === p.label }"
+              :aria-pressed="!custom && activePreset?.label === p.label" @click="pick(p)" x-text="p.label"></button>
+    </template>
+    <button type="button" class="share-preset" :class="{ 'is-active': custom }"
+            :aria-pressed="custom" @click="custom ? (custom = false, adjust = false) : openCustom()">
+      <i class="fas fa-sliders mr-1"></i>Autre…
+    </button>
   </div>
+
+  <div class="share-custom" x-show="custom" x-cloak>
+    {# Two people: one slider #}
+    <template x-if="users.length === 2 && !adjust">
+      <div class="share-slider">
+        <span class="share-slider-side">
+          <strong x-text="me.name"></strong><span x-text="round(mine) + ' %'"></span>
+        </span>
+        <input type="range" min="0" max="100" step="5" class="share-range"
+               :value="100 - mine" @input="slide($event.target.value)"
+               :aria-label="'Part de ' + other.name" :aria-valuetext="other.name + ' ' + round(100 - mine) + ' %, moi ' + round(mine) + ' %'">
+        <span class="share-slider-side is-right">
+          <strong x-text="other.name"></strong><span x-text="round(100 - mine) + ' %'"></span>
+        </span>
+      </div>
+    </template>
+    {# Three or more: who shares equally #}
+    <template x-if="users.length > 2 && !adjust">
+      <div class="share-presets">
+        <template x-for="u in users" :key="u.id">
+          <button type="button" class="share-preset" :class="{ 'is-active': included(u.id) }"
+                  :aria-pressed="included(u.id)" @click="toggle(u.id)">
+            <i class="fas mr-1" :class="included(u.id) ? 'fa-check' : 'fa-plus'"></i>
+            <span x-text="u.name"></span>
+          </button>
+        </template>
+      </div>
+    </template>
+    {# Exact values #}
+    <div class="share-inline-list" x-show="adjust" x-cloak>
+      <template x-for="u in users" :key="u.id">
+        <div class="share-inline-row">
+          <span class="share-inline-label">
+            <span x-text="u.full_name"></span>
+            <span x-show="u.is_me" class="text-xs text-indigo-500 font-medium">(vous)</span>
+          </span>
+          <input type="number" min="0" step="0.01" placeholder="0"
+                 class="input text-sm share-inline-input"
+                 x-model="shares[u.id]" :max="max(u.id)"
+                 @keydown.enter.prevent="$el.blur()">
+        </div>
+      </template>
+    </div>
+    <button type="button" class="share-adjust" @click="adjust = !adjust"
+            x-text="adjust ? (users.length === 2 ? 'Revenir au curseur' : 'Revenir aux choix') : 'Ajuster les valeurs'"></button>
+  </div>
+
   <p x-show="total > 100.001" x-cloak class="text-xs text-red-500 mt-1">
     La somme des parts ne peut pas dépasser 100 %.
   </p>

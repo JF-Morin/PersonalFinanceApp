@@ -661,7 +661,11 @@ select.input {
   }
   .dark .filter-card > .table-toolbar { background: #1e293b; border-color: #334155; box-shadow: none; }
   .filter-card > .rtable-wrap { background: transparent !important; }
-  .filter-card .rtable > tbody { padding: 0.625rem 0 0; }
+  /* The list runs behind the floating bottom nav (app.css): room at the end so the
+     last card can scroll above it */
+  .filter-card .rtable > tbody {
+    padding: 0.625rem 0 calc(var(--bottomnav-h) + var(--bottomnav-gap) + env(safe-area-inset-bottom, 0px) + 0.75rem);
+  }
   .table-toolbar { flex-wrap: wrap; }
   .toolbar-search { flex: 1 1 100%; order: -1; height: 2.25rem; }
 }

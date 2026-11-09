@@ -556,9 +556,60 @@ async fn insert_form_options(ctx: &mut tera::Context, db: &DbPool, user_id: i64)
         .await?;
     ctx.insert("currencies", &currencies);
     ctx.insert("categories", &categories);
-    ctx.insert("users", &users);
     ctx.insert("current_user_id", &user_id);
+
+    // Participants for modal/_shares_field.html: current user first, and only what the
+    // page may see (the `User` rows also carry the password hash).
+    let mut share_users: Vec<ShareUser> = users
+        .iter()
+        .map(|u| ShareUser {
+            id: u.id,
+            name: u.name.clone(),
+            full_name: u.display_name(),
+            is_me: u.id == user_id,
+        })
+        .collect();
+    share_users.sort_by_key(|u| !u.is_me);
+    ctx.insert("share_users", &share_users);
+    ctx.insert("users", &users);
+    ctx.insert("split_hints", &split_hints(db, user_id).await?);
     Ok(())
+}
+
+/// One participant of the shares field.
+#[derive(Serialize)]
+struct ShareUser {
+    id: i64,
+    name: String,
+    full_name: String,
+    is_me: bool,
+}
+
+/// `{category_id: {user_id: share}}` — for each category, the split of `user_id`'s most
+/// recent complete transaction in it. The shares field offers it as a one-tap suggestion
+/// ("Dernier partage") when that category is picked. Per owner: the same category can
+/// be split differently depending on who paid (e.g. restaurants).
+async fn split_hints(db: &DbPool, user_id: i64) -> AppResult<HashMap<String, HashMap<String, f64>>> {
+    let rows: Vec<(i64, i64, i64, f64)> = sqlx::query_as(
+        "SELECT t.id, t.category_id, ts.user_id, ts.share \
+         FROM transactions t \
+         JOIN transaction_status s ON t.status_id = s.id \
+         JOIN transaction_shares ts ON ts.transaction_id = t.id \
+         WHERE s.name = 'complete' AND t.category_id IS NOT NULL AND t.owner_id = ? \
+         ORDER BY t.date DESC, t.id DESC",
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await?;
+    // Rows arrive newest first: the first transaction seen for a category is its latest.
+    let mut latest: HashMap<i64, i64> = HashMap::new();
+    let mut hints: HashMap<String, HashMap<String, f64>> = HashMap::new();
+    for (transaction_id, category_id, share_user_id, share) in rows {
+        if *latest.entry(category_id).or_insert(transaction_id) == transaction_id {
+            hints.entry(category_id.to_string()).or_default().insert(share_user_id.to_string(), share);
+        }
+    }
+    Ok(hints)
 }
 
 /// `{user_id: share}` — initial values for `modal/_shares_field.html`.

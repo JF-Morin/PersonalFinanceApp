@@ -83,6 +83,74 @@
      @close-modal.window="close()"></div>
 
 <!--
+  Phones (<640px, where modals are bottom sheets): swipe the sheet down to close it.
+  A drag starts only on a downward, mostly vertical move, when nothing between the finger
+  and the sheet is scrolled down (otherwise the move scrolls back up as usual), and never
+  on a slider or a text area. Released past 1/4 of its height (or flicked), the sheet
+  slides out and close-modal empties #modal-root; otherwise it springs back.
+-->
+<script>
+(() => {
+  const root = document.getElementById('modal-root');
+  const phone = window.matchMedia('(max-width: 639px)');
+  let sheet = null, startY = 0, startX = 0, startT = 0, dy = 0, dragging = false;
+
+  const scrolledAbove = (el) => {
+    for (; el && el !== root; el = el.parentElement) if (el.scrollTop > 0) return true;
+    return false;
+  };
+  const reset = () => { sheet = null; dragging = false; dy = 0; };
+
+  root.addEventListener('touchstart', (e) => {
+    const s = e.target.closest('#modal-root > .modal-sheet');
+    if (!phone.matches || !s || e.touches.length > 1
+        || e.target.closest('input[type=range], textarea') || scrolledAbove(e.target)) return reset();
+    sheet = s; dragging = false; dy = 0;
+    startY = e.touches[0].clientY; startX = e.touches[0].clientX; startT = e.timeStamp;
+  }, { passive: true });
+
+  root.addEventListener('touchmove', (e) => {
+    if (!sheet) return;
+    const y = e.touches[0].clientY - startY, x = e.touches[0].clientX - startX;
+    if (!dragging) {
+      if (Math.abs(y) < 8 && Math.abs(x) < 8) return;
+      // Upward or sideways first: a normal scroll / gesture, not a drag.
+      if (y <= 0 || Math.abs(x) > Math.abs(y)) return reset();
+      dragging = true;
+      sheet.style.transition = root.style.transition = 'none';
+      document.activeElement?.blur?.();
+    }
+    e.preventDefault();
+    dy = Math.max(0, y);
+    sheet.style.transform = `translateY(${dy}px)`;
+    root.style.backgroundColor = `rgba(0,0,0,${0.55 * (1 - Math.min(1, dy / sheet.offsetHeight))})`;
+  }, { passive: false });
+
+  const end = (e) => {
+    if (!sheet || !dragging) return reset();
+    const s = sheet, speed = dy / Math.max(1, e.timeStamp - startT);
+    s.style.transition = 'transform 0.2s ease-out';
+    root.style.transition = 'background-color 0.2s ease-out';
+    if (dy > s.offsetHeight / 4 || (speed > 0.6 && dy > 40)) {
+      s.style.transform = 'translateY(100%)';
+      root.style.backgroundColor = 'rgba(0,0,0,0)';
+      // Then close; the next modal opens on a fully visible layer again.
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('close-modal'));
+        setTimeout(() => { root.style.backgroundColor = ''; root.style.transition = ''; }, 20);
+      }, 200);
+    } else {
+      s.style.transform = '';
+      root.style.backgroundColor = '';
+    }
+    reset();
+  };
+  root.addEventListener('touchend', end);
+  root.addEventListener('touchcancel', end);
+})();
+</script>
+
+<!--
   The one notification toast. Fired by HX-Trigger {"toast": {"msg": "…", "ok": true}}
   (handlers::toast_header), on page load by a `flash` in the context (handlers::insert_flash,
   used after plain form-post redirects), and for every failed HTMX request: an error status
