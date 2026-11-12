@@ -1,29 +1,69 @@
 {#
   Rendered alone by GET /settings/users/:id/delete into #modal-root (admin only).
-  Confirming sends DELETE /settings/users/:id: toast + `users-changed` (the users table
-  re-fetches itself); deleting your own account logs you out (HX-Redirect to /login).
+  - The user has no data → delete: DELETE /settings/users/:id.
+  - The user has data (transactions, shares, imported files) → deactivate instead:
+    POST /settings/users/:id/deactivate (or, already deactivated, reactivate).
+  Answers carry a toast, `close-modal` and `users-changed` (the users table re-fetches
+  itself); removing your own account logs you out (HX-Redirect to /login).
 #}
-{% set modal_title = "Supprimer l'utilisateur ?" %}{% set modal_icon = "fa-user-xmark" %}{% set modal_tone = "danger" %}
-{% set modal_subtitle = user.name %}{% if user.last_name %}{% set modal_subtitle = user.name ~ " " ~ user.last_name %}{% endif %}
+{% set full_name = user.name %}{% if user.last_name %}{% set full_name = user.name ~ " " ~ user.last_name %}{% endif %}
+{% if not has_data %}
+  {% set modal_title = "Supprimer l'utilisateur ?" %}{% set modal_icon = "fa-user-xmark" %}{% set modal_tone = "danger" %}
+{% elif user.is_active %}
+  {% set modal_title = "Désactiver l'utilisateur ?" %}{% set modal_icon = "fa-user-slash" %}{% set modal_tone = "danger" %}
+{% else %}
+  {% set modal_title = "Utilisateur désactivé" %}{% set modal_icon = "fa-user-slash" %}
+{% endif %}
+{% set modal_subtitle = full_name %}
 <div class="modal-sheet card w-full" style="--modal-width: 28rem">
   {% include "modal/_header.html" %}
-  <p class="text-sm text-gray-600 dark:text-gray-300">
-    {% if is_self %}
-    Vous allez supprimer <strong>votre propre compte</strong> et être déconnecté.
-    Le prochain utilisateur créé deviendra administrateur.
+  <div class="text-sm text-gray-600 dark:text-gray-300 space-y-2">
+    {% if not has_data %}
+      <p>Ce profil n'a aucune donnée : il sera supprimé définitivement.</p>
+      {% if is_self %}
+      <p>Vous allez supprimer <strong>votre propre compte</strong> et être déconnecté.
+        {% if next_admin %}<strong>{{ next_admin }}</strong> deviendra administrateur.{% else %}Le prochain utilisateur créé deviendra administrateur.{% endif %}</p>
+      {% endif %}
     {% else %}
-    Le profil sera supprimé définitivement.
+      <p>{{ full_name }} a encore
+        {{ data.transactions }} transaction(s), {{ data.shares }} part(s) dans des transactions
+        et {{ data.files }} fichier(s) importé(s) : ces données restent, pour que l'historique
+        et les soldes des autres utilisateurs ne changent pas.</p>
+      {% if user.is_active %}
+      <p>Le profil sera <strong>désactivé</strong> : il ne pourra plus se connecter et ne sera plus
+        proposé comme participant. Vous pourrez le réactiver.</p>
+      {% if is_self %}
+      <p>Vous allez désactiver <strong>votre propre compte</strong> et être déconnecté.
+        {% if next_admin %}<strong>{{ next_admin }}</strong> deviendra administrateur.{% endif %}</p>
+      {% endif %}
+      {% else %}
+      <p>Il ne peut donc pas être supprimé. Le réactiver lui permet de se connecter à nouveau.</p>
+      {% endif %}
     {% endif %}
-    Un utilisateur qui a encore des transactions, des parts ou des fichiers importés ne peut pas être supprimé.
-  </p>
+  </div>
   <div class="modal-footer">
     <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+    {% if not has_data %}
     <button hx-delete="/settings/users/{{ user.id }}"
             hx-swap="none"
             hx-disabled-elt="this"
-            @htmx:after-request="close()"
             class="btn-danger">
       <i class="fas fa-trash-can"></i> Supprimer
     </button>
+    {% elif user.is_active %}
+    <button hx-post="/settings/users/{{ user.id }}/deactivate"
+            hx-swap="none"
+            hx-disabled-elt="this"
+            class="btn-danger">
+      <i class="fas fa-user-slash"></i> Désactiver
+    </button>
+    {% else %}
+    <button hx-post="/settings/users/{{ user.id }}/reactivate"
+            hx-swap="none"
+            hx-disabled-elt="this"
+            class="btn-primary">
+      <i class="fas fa-user-check"></i> Réactiver
+    </button>
+    {% endif %}
   </div>
 </div>

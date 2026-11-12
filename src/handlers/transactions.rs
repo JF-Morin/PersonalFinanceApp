@@ -581,8 +581,10 @@ fn number(v: f64) -> String {
 
 // ── Modals (rendered into #modal-root) ────────────────────────────────────────
 
-/// Select options and participants every transaction form needs.
-async fn insert_form_options(ctx: &mut tera::Context, db: &DbPool, user_id: i64) -> AppResult<()> {
+/// Select options and participants every transaction form needs. Participants are the
+/// active users, plus `keep`: users already sharing the transaction being edited, even if
+/// deactivated since (otherwise saving the form would drop their share).
+async fn insert_form_options(ctx: &mut tera::Context, db: &DbPool, user_id: i64, keep: &[i64]) -> AppResult<()> {
     let currencies = sqlx::query_as::<_, Currency>("SELECT * FROM currencies ORDER BY name")
         .fetch_all(db)
         .await?;
@@ -600,6 +602,7 @@ async fn insert_form_options(ctx: &mut tera::Context, db: &DbPool, user_id: i64)
     // page may see (the `User` rows also carry the password hash).
     let mut share_users: Vec<ShareUser> = users
         .iter()
+        .filter(|u| u.is_active || keep.contains(&u.id))
         .map(|u| ShareUser {
             id: u.id,
             name: u.name.clone(),
@@ -650,6 +653,25 @@ async fn split_hints(db: &DbPool, user_id: i64) -> AppResult<HashMap<String, Has
     Ok(hints)
 }
 
+/// Users with a share in `t`.
+fn share_user_ids(t: &TransactionView) -> Vec<i64> {
+    t.shares.iter().map(|s| s.user_id).collect()
+}
+
+/// A share given to a deactivated user is refused, unless they already had one in this
+/// transaction (`keep`) — `Err` is the user-facing message.
+async fn check_share_users(db: &DbPool, shares: &[(i64, f64)], keep: &[i64]) -> AppResult<Result<(), String>> {
+    let inactive: Vec<(i64, String)> = sqlx::query_as("SELECT id, name FROM users WHERE is_active = 0")
+        .fetch_all(db)
+        .await?;
+    for (user_id, _) in shares {
+        if let Some((_, name)) = inactive.iter().find(|(id, _)| id == user_id && !keep.contains(user_id)) {
+            return Ok(Err(format!("{} est désactivé : impossible de lui attribuer une part.", name)));
+        }
+    }
+    Ok(Ok(()))
+}
+
 /// `{user_id: share}` — initial values for `modal/_shares_field.html`.
 fn shares_init(t: &TransactionView) -> HashMap<String, f64> {
     t.shares.iter().map(|s| (s.user_id.to_string(), s.share)).collect()
@@ -678,7 +700,7 @@ pub async fn get_manual_modal(
 ) -> AppResult<Html<String>> {
     let user_id = get_user_id(&jar)?;
     let mut ctx = tera::Context::new();
-    insert_form_options(&mut ctx, &state.db, user_id).await?;
+    insert_form_options(&mut ctx, &state.db, user_id, &[]).await?;
     ctx.insert("today", &clock.today());
     ctx.insert("shares_init", &HashMap::<String, f64>::new());
     Ok(Html(state.tera.render("modal/transaction_manual.html", &ctx)?))
@@ -693,7 +715,7 @@ pub async fn get_edit_modal(
     let user_id = get_user_id(&jar)?;
     let t = owned_transaction(&state.db, user_id, id).await?;
     let mut ctx = tera::Context::new();
-    insert_form_options(&mut ctx, &state.db, user_id).await?;
+    insert_form_options(&mut ctx, &state.db, user_id, &share_user_ids(&t)).await?;
     ctx.insert("shares_init", &shares_init(&t));
     ctx.insert("t", &t);
     Ok(Html(state.tera.render("modal/transaction_edit.html", &ctx)?))
@@ -805,6 +827,15 @@ async fn update_transaction(
     let Some((broken, original_cents, original_currency_id, date, mut rate, currency_id)) = row else {
         return Ok(Err("Transaction introuvable ou non autorisée".into()));
     };
+    if let Some(shares) = &shares {
+        let current: Vec<i64> = sqlx::query_scalar("SELECT user_id FROM transaction_shares WHERE transaction_id = ?")
+            .bind(id)
+            .fetch_all(&state.db)
+            .await?;
+        if let Err(msg) = check_share_users(&state.db, shares, &current).await? {
+            return Ok(Err(msg));
+        }
+    }
     // Operation and amount are only correctable on a broken line.
     let (operation, original_cents) = if broken {
         (
@@ -927,7 +958,7 @@ async fn render_carousel_card(
 ) -> AppResult<Html<String>> {
     let t = &pending[index];
     let mut ctx = tera::Context::new();
-    insert_form_options(&mut ctx, &state.db, user_id).await?;
+    insert_form_options(&mut ctx, &state.db, user_id, &share_user_ids(t)).await?;
     ctx.insert("t", t);
     ctx.insert("index", &index);
     ctx.insert("count", &pending.len());
@@ -1048,9 +1079,7 @@ pub struct ManualTransactionForm {
 
 /// POST /transactions/manual — create a transaction directly (not from a PDF).
 ///
-/// Manual transactions are linked to a synthetic `imported_files` row with
-/// filename = 'manual' so the rest of the codebase can treat them uniformly.
-/// That sentinel row is created on demand the first time a manual transaction is added.
+/// A manual transaction has no file: `from_file_id` is NULL.
 ///
 /// The form uses `hx-swap="none"`; the response's HX-Trigger shows a toast, closes the
 /// modal and fires `transactions-changed` so the table re-fetches itself.
@@ -1066,6 +1095,9 @@ pub async fn post_manual_transaction(
         Ok(shares) => shares,
         Err(msg) => return Ok(htmx_inline_error("#manual-transaction-error", &msg)),
     };
+    if let Err(msg) = check_share_users(&state.db, &shares, &[]).await? {
+        return Ok(htmx_inline_error("#manual-transaction-error", &msg));
+    }
 
     let category_id: Option<i64> = form.category_id
         .as_deref()
@@ -1116,31 +1148,13 @@ pub async fn post_manual_transaction(
     // outside it): the transaction, its shares and its status are saved together.
     let mut tx = state.db.begin().await?;
 
-    // Look up or create the synthetic "manual" import record.
-    let file_id: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM imported_files WHERE filename = 'manual' LIMIT 1"
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-
-    let file_id = if let Some(id) = file_id {
-        id
-    } else {
-        sqlx::query_scalar(
-            "INSERT INTO imported_files (filename, bank_id, source_file, row_count, importer_id) VALUES ('manual', 1, '', 0, ?) RETURNING id",
-        )
-        .bind(user_id)
-        .fetch_one(&mut *tx)
-        .await?
-    };
-
     // status_id 1 = pending (recalculate_status below may promote it to 2, complete),
     // or 3 = broken when the exchange rate is missing.
     let new_transaction_id: i64 = sqlx::query_scalar(
         "INSERT INTO transactions (date, transaction_date, operation, \
          original_amount_cents, original_currency_id, exchange_rate, amount_cents, currency_id, \
-         category_id, owner_id, status_id, from_file_id, notes, parse_note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         category_id, owner_id, status_id, notes, parse_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&form.date)
     .bind(&form.date)
@@ -1153,7 +1167,6 @@ pub async fn post_manual_transaction(
     .bind(category_id)
     .bind(user_id)
     .bind(if parse_note.is_some() { 3 } else { 1 })
-    .bind(file_id)
     .bind(&form.notes)
     .bind(&parse_note)
     .fetch_one(&mut *tx)
@@ -1257,9 +1270,8 @@ struct TransactionViewRaw {
     shares_json: String,
     status_name: String,
     notes: Option<String>,
-    from_file_id: i64,
-    /// 1 when the linked imported_files row has filename = 'manual', else 0.
-    is_manual: i64,
+    /// `None` = manual transaction.
+    from_file_id: Option<i64>,
     parse_note: Option<String>,
 }
 
@@ -1290,9 +1302,8 @@ fn raw_to_view(r: TransactionViewRaw) -> TransactionView {
         shares_total,
         status_name: r.status_name,
         notes: r.notes,
+        is_manual: r.from_file_id.is_none(),
         from_file_id: r.from_file_id,
-        // SQLite stores booleans as integers; convert 1/0 to Rust bool.
-        is_manual: r.is_manual != 0,
         parse_note: r.parse_note,
     }
 }
@@ -1307,12 +1318,14 @@ const TRANSACTION_VIEW_SELECT: &str = r#"
            t.original_amount_cents, t.original_currency_id,
            oc.symbol AS original_currency_symbol, t.exchange_rate,
            cat.name AS category_name, t.category_id,
-           u.name || COALESCE(' ' || u.last_name, '') AS owner_name, t.owner_id,
+           u.name || COALESCE(' ' || NULLIF(u.last_name, ''), '') ||
+               CASE WHEN u.is_active THEN '' ELSE ' (désactivé)' END AS owner_name, t.owner_id,
            COALESCE((
                SELECT json_group_array(json_object(
                    'user_id',   ts.user_id,
                    'share',     ts.share,
-                   'user_name', su.name || COALESCE(' ' || su.last_name, ''),
+                   'user_name', su.name || COALESCE(' ' || NULLIF(su.last_name, ''), '') ||
+                                CASE WHEN su.is_active THEN '' ELSE ' (désactivé)' END,
                    'initials',  UPPER(SUBSTR(su.name, 1, 1)) ||
                                 COALESCE(UPPER(SUBSTR(su.last_name, 1, 1)), '')
                ))
@@ -1321,7 +1334,6 @@ const TRANSACTION_VIEW_SELECT: &str = r#"
                WHERE ts.transaction_id = t.id
            ), '[]') AS shares_json,
            s.name AS status_name, t.notes, t.from_file_id,
-           CASE WHEN imf.filename = 'manual' THEN 1 ELSE 0 END AS is_manual,
            t.parse_note
     FROM transactions t
     JOIN currencies cur ON t.currency_id = cur.id
@@ -1329,7 +1341,6 @@ const TRANSACTION_VIEW_SELECT: &str = r#"
     LEFT JOIN categories cat ON t.category_id = cat.id
     JOIN users u ON t.owner_id = u.id
     JOIN transaction_status s ON t.status_id = s.id
-    LEFT JOIN imported_files imf ON t.from_file_id = imf.id
 "#;
 
 /// Fetch all transactions (or only pending/broken ones) with all display data joined in.

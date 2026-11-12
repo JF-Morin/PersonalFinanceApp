@@ -60,7 +60,7 @@ pub async fn get_login(
     if let Some(cookie) = jar.get("user_id") {
         let uid: Option<i64> = cookie.value().parse().ok();
         let exists = if let Some(id) = uid {
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE id = ?")
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE id = ? AND is_active = 1")
                 .bind(id)
                 .fetch_one(&state.db)
                 .await
@@ -71,7 +71,7 @@ pub async fn get_login(
         if exists {
             return Ok(Redirect::to("/").into_response());
         }
-        // Stale cookie (user was deleted) — clear it and show login page
+        // Stale cookie (user deleted or deactivated) — clear it and show login page
         let clean_jar = jar.remove(Cookie::build(("user_id", "")).path("/").build());
         let html = render_login_page(&state, &query).await?;
         return Ok((clean_jar, html).into_response());
@@ -91,7 +91,8 @@ async fn nobody_has_password(db: &crate::db::DbPool) -> AppResult<bool> {
 
 /// Build and render the login page template with the list of users and banks.
 async fn render_login_page(state: &crate::AppState, query: &LoginQuery) -> AppResult<Html<String>> {
-    let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
+    // Deactivated users can't log in: they aren't listed.
+    let users = sqlx::query_as::<_, User>("SELECT * FROM users WHERE is_active = 1 ORDER BY name")
         .fetch_all(&state.db)
         .await?;
 
@@ -120,7 +121,9 @@ async fn render_login_page(state: &crate::AppState, query: &LoginQuery) -> AppRe
     ctx.insert("banks", &banks);
     ctx.insert("theme", &theme);
     ctx.insert("is_dark", &(theme == "dark"));
-    let flash = if query.error.as_deref() == Some("nopassword") {
+    let flash = if query.error.as_deref() == Some("inactive") {
+        Some("Ce profil n'existe pas ou a été désactivé.")
+    } else if query.error.as_deref() == Some("nopassword") {
         Some("Ce profil n'a pas de mot de passe et ne peut pas se connecter. Contactez l'administrateur.")
     } else if query.error.is_some() {
         Some("Mot de passe incorrect. Réessayez.")
@@ -150,7 +153,7 @@ pub async fn get_login_modal(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> AppResult<Html<String>> {
-    let u = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+    let u = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ? AND is_active = 1")
         .bind(id)
         .fetch_optional(&state.db)
         .await?
@@ -185,11 +188,15 @@ pub async fn post_login(
     jar: SignedCookieJar,
     Form(form): Form<LoginForm>,
 ) -> AppResult<impl IntoResponse> {
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+    // A deactivated user can't log in (same answer as an unknown profile).
+    let Some(user) = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ? AND is_active = 1")
         .bind(form.user_id)
         .fetch_optional(&state.db)
         .await?
-        .ok_or_else(|| AppError::Other("Utilisateur introuvable".into()))?;
+    else {
+        tracing::warn!(user_id = %form.user_id, "Login refused: unknown or deactivated profile");
+        return Ok(Redirect::to("/login?error=inactive").into_response());
+    };
 
     if user.password_hash.is_none() {
         // ── Password-less profile: only allowed while nobody has a password ─────────

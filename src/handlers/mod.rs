@@ -144,6 +144,32 @@ pub async fn htmx_redirects(req: axum::extract::Request, next: axum::middleware:
     res
 }
 
+/// Middleware: a session whose user no longer exists or was deactivated ends here — the
+/// cookie is removed and the request redirected to /login (turned into HX-Redirect for
+/// HTMX by `htmx_redirects`). Pages reachable without a session are let through.
+pub async fn require_active_user(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let public = ["/login", "/logout", "/static/", "/404-not-found"];
+    let path = req.uri().path();
+    if let (Ok(user_id), false) = (get_user_id(&jar), public.iter().any(|p| path.starts_with(p))) {
+        let active: Option<bool> = sqlx::query_scalar("SELECT is_active FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or(Some(true)); // a DB error is reported by the handler itself
+        if active != Some(true) {
+            tracing::info!(user_id = %user_id, "Session ended: user deleted or deactivated");
+            let jar = jar.remove(axum_extra::extract::cookie::Cookie::build(("user_id", "")).path("/").build());
+            return (jar, axum::response::Redirect::to("/login")).into_response();
+        }
+    }
+    next.run(req).await
+}
+
 /// Dedicated 404 page at /404-not-found.
 pub async fn get_not_found(State(state): State<AppState>) -> impl IntoResponse {
     let html = state

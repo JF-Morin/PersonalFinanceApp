@@ -398,26 +398,136 @@ struct EditUserView {
     has_password: bool,
 }
 
-/// GET /settings/users/:id/delete — the delete confirmation modal (admin only, like the
-/// deletion itself).
+/// What a user still has in the app: owned transactions, shares in transactions, imported
+/// files. A user with any of these is deactivated rather than deleted.
+#[derive(Serialize, Default)]
+struct UserData {
+    transactions: i64,
+    shares: i64,
+    files: i64,
+}
+
+impl UserData {
+    async fn of(db: &crate::db::DbPool, user_id: i64) -> AppResult<UserData> {
+        let (transactions, shares, files): (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM transactions WHERE owner_id = ?1), \
+                    (SELECT COUNT(*) FROM transaction_shares WHERE user_id = ?1), \
+                    (SELECT COUNT(*) FROM imported_files WHERE importer_id = ?1)",
+        )
+        .bind(user_id)
+        .fetch_one(db)
+        .await?;
+        Ok(UserData { transactions, shares, files })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.transactions == 0 && self.shares == 0 && self.files == 0
+    }
+}
+
+/// The user who becomes admin when `leaving_id` (the admin) leaves: the oldest other
+/// active user.
+async fn next_admin<'e, E: sqlx::SqliteExecutor<'e>>(executor: E, leaving_id: i64) -> AppResult<Option<(i64, String)>> {
+    Ok(sqlx::query_as("SELECT id, name FROM users WHERE is_active = 1 AND id != ? ORDER BY id LIMIT 1")
+        .bind(leaving_id)
+        .fetch_optional(executor)
+        .await?)
+}
+
+/// Pass the admin role from `leaving_id` to the next admin, if there is one (on the
+/// caller's DB transaction). Without one, the next user created becomes admin.
+async fn hand_over_admin(conn: &mut sqlx::SqliteConnection, leaving_id: i64) -> AppResult<()> {
+    sqlx::query("UPDATE users SET is_admin = 0 WHERE id = ?").bind(leaving_id).execute(&mut *conn).await?;
+    if let Some((next_id, _)) = next_admin(&mut *conn, leaving_id).await? {
+        sqlx::query("UPDATE users SET is_admin = 1 WHERE id = ?").bind(next_id).execute(&mut *conn).await?;
+        tracing::info!(user_id = %next_id, "Admin role handed over");
+    }
+    Ok(())
+}
+
+/// The admin making the request, or the reason they can't.
+async fn require_admin(jar: &SignedCookieJar, db: &crate::db::DbPool) -> AppResult<User> {
+    let viewer = super::get_current_user(jar, db).await?;
+    if !viewer.is_admin {
+        return Err(AppError::Other("Seul l'administrateur peut désactiver ou supprimer des utilisateurs.".into()));
+    }
+    Ok(viewer)
+}
+
+/// GET /settings/users/:id/delete — the admin's modal for removing a user: delete when the
+/// user has no data, otherwise deactivate (or reactivate, if already deactivated).
 pub async fn get_delete_user_modal(
     State(state): State<AppState>,
     jar: SignedCookieJar,
     Path(id): Path<i64>,
 ) -> AppResult<Html<String>> {
-    let viewer = super::get_current_user(&jar, &state.db).await?;
-    if !viewer.is_admin {
-        return Err(AppError::Other("Seul l'administrateur peut supprimer des utilisateurs.".into()));
-    }
+    let viewer = require_admin(&jar, &state.db).await?;
     let u = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
         .bind(id)
         .fetch_optional(&state.db)
         .await?
         .ok_or_else(|| AppError::Other("Utilisateur introuvable".into()))?;
+    let data = UserData::of(&state.db, id).await?;
     let mut ctx = tera::Context::new();
-    ctx.insert("user", &serde_json::json!({ "id": u.id, "name": u.name, "last_name": u.last_name }));
+    ctx.insert("user", &serde_json::json!({ "id": u.id, "name": u.name, "last_name": u.last_name, "is_active": u.is_active }));
     ctx.insert("is_self", &(u.id == viewer.id));
+    ctx.insert("has_data", &!data.is_empty());
+    ctx.insert("data", &data);
+    ctx.insert("next_admin", &next_admin(&state.db, u.id).await?.map(|(_, name)| name));
     Ok(Html(state.tera.render("modal/user_delete.html", &ctx)?))
+}
+
+/// POST /settings/users/:id/deactivate — deactivate a user (admin only): they can't log
+/// in any more (an open session ends on its next request) and aren't offered as a
+/// participant; their transactions, shares and files stay. The admin deactivating
+/// themselves hands the role to the oldest other active user, and is logged out.
+pub async fn post_deactivate_user(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Path(id): Path<i64>,
+) -> AppResult<axum::response::Response> {
+    let viewer = require_admin(&jar, &state.db).await?;
+    let is_self = viewer.id == id;
+    if is_self && next_admin(&state.db, id).await?.is_none() {
+        return Err(AppError::Other("Vous êtes le dernier utilisateur actif : impossible de vous désactiver.".into()));
+    }
+    let mut tx = state.db.begin().await?;
+    let done = sqlx::query("UPDATE users SET is_active = 0 WHERE id = ? AND is_active = 1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if done == 0 {
+        return Err(AppError::Other("Utilisateur introuvable ou déjà désactivé.".into()));
+    }
+    if is_self {
+        hand_over_admin(&mut tx, id).await?;
+    }
+    tx.commit().await?;
+    tracing::info!(user_id = %id, by = %viewer.id, "User deactivated");
+    state.events.send(AppEvent { kind: "users", actor_id: viewer.id });
+
+    if is_self {
+        let jar = jar.remove(Cookie::build(("user_id", "")).path("/").build());
+        return Ok((jar, htmx_redirect("/login")).into_response());
+    }
+    Ok(toast_response("Utilisateur désactivé.", true, &["close-modal", "users-changed"]))
+}
+
+/// POST /settings/users/:id/reactivate — let a deactivated user log in again (admin only).
+pub async fn post_reactivate_user(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Path(id): Path<i64>,
+) -> AppResult<axum::response::Response> {
+    let viewer = require_admin(&jar, &state.db).await?;
+    sqlx::query("UPDATE users SET is_active = 1 WHERE id = ?")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    tracing::info!(user_id = %id, by = %viewer.id, "User reactivated");
+    state.events.send(AppEvent { kind: "users", actor_id: viewer.id });
+    Ok(toast_response("Utilisateur réactivé.", true, &["close-modal", "users-changed"]))
 }
 
 /// GET /settings/users/:id/edit — the edit-user modal (loaded into `#modal-root`); only
@@ -497,18 +607,22 @@ pub async fn delete_user(
         return Err(AppError::Unauthorized);
     }
 
-    // Foreign keys refuse to delete a user who still owns transactions, shares or files.
-    if let Err(e) = sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&state.db).await {
-        tracing::warn!(user_id = %id, err = %e, "User delete refused");
+    // Only a user without data is deleted; the others are deactivated instead (the modal
+    // offers that). The foreign keys would refuse anyway.
+    if !UserData::of(&state.db, id).await?.is_empty() {
+        let msg = "Cet utilisateur a des transactions, des parts ou des fichiers importés : désactivez-le plutôt.";
         if is_htmx(&headers) {
-            return Ok(toast_response(
-                "Impossible de supprimer cet utilisateur : il a encore des transactions, des parts ou des fichiers importés.",
-                false,
-                &["users-changed"],
-            ));
+            return Ok(toast_response(msg, false, &["users-changed"]));
         }
-        return Err(e.into());
+        return Err(AppError::Other(msg.into()));
     }
+    let mut tx = state.db.begin().await?;
+    if is_self {
+        // The admin deleting their own account hands the role over.
+        hand_over_admin(&mut tx, id).await?;
+    }
+    sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
 
     tracing::info!(user_id = %id, self_delete = %is_self, "User deleted");
     state.events.send(AppEvent { kind: "users", actor_id: current_user_id.unwrap_or(0) });
@@ -530,7 +644,7 @@ pub async fn delete_user(
 
     if is_htmx(&headers) {
         // The whole users table re-fetches itself (`users-changed`).
-        Ok(toast_response("Utilisateur supprimé.", true, &["users-changed"]))
+        Ok(toast_response("Utilisateur supprimé.", true, &["close-modal", "users-changed"]))
     } else {
         Ok(Redirect::to("/settings").into_response())
     }
@@ -538,7 +652,8 @@ pub async fn delete_user(
 
 /// Every user, with `last_login` (stored in UTC) in the viewer's local time.
 async fn users_in_local_time(state: &AppState, clock: &UserClock) -> AppResult<Vec<User>> {
-    let mut users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
+    // Active users first.
+    let mut users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY is_active DESC, name")
         .fetch_all(&state.db)
         .await?;
     for u in &mut users {

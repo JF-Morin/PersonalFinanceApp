@@ -310,10 +310,7 @@ async fn insert_stats(ctx: &mut tera::Context, db: &crate::db::DbPool, user_id: 
     let total_transactions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
         .fetch_one(db)
         .await?;
-    // Exclude the synthetic "manual" file row that is created for manually-added transactions.
-    let total_files: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM imported_files WHERE filename != 'manual'"
-    )
+    let total_files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM imported_files")
     .fetch_one(db)
     .await?;
     let pending_count: i64 = sqlx::query_scalar(

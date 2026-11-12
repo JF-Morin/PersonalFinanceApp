@@ -16,17 +16,22 @@ pub struct User {
     pub bank_id: Option<i64>,
     pub password_hash: Option<String>,
     pub last_login: Option<String>,
-    /// The admin (first user of the app) is the only one who can delete users.
+    /// The admin (first user of the app) is the only one who can deactivate or delete users.
     pub is_admin: bool,
+    /// False once deactivated: can't log in, isn't offered as a participant; their data
+    /// stays (migration 009).
+    pub is_active: bool,
 }
 
 impl User {
-    /// "Prénom Nom" or just "Prénom" if no last name is set.
+    /// "Prénom Nom" or just "Prénom" if no last name is set, plus " (désactivé)" for a
+    /// deactivated user.
     pub fn display_name(&self) -> String {
-        match &self.last_name {
+        let name = match self.last_name.as_deref().map(str::trim).filter(|ln| !ln.is_empty()) {
             Some(ln) => format!("{} {}", self.name, ln),
             None => self.name.clone(),
-        }
+        };
+        if self.is_active { name } else { format!("{} (désactivé)", name) }
     }
 }
 
@@ -122,8 +127,9 @@ pub struct TransactionView {
     /// "pending", "complete", or "broken".
     pub status_name: String,
     pub notes: Option<String>,
-    pub from_file_id: i64,
-    /// True when from_file_id points to the synthetic "manual" import record.
+    /// The imported file it comes from; `None` for a manual transaction.
+    pub from_file_id: Option<i64>,
+    /// Added by hand (no file).
     pub is_manual: bool,
     /// Non-None for "broken" transactions — the raw parser note shown in the carousel.
     pub parse_note: Option<String>,

@@ -148,6 +148,8 @@ async fn main() -> anyhow::Result<()> {
                                           .post(handlers::settings::post_new_user))
         .route("/settings/users/:id",      delete(handlers::settings::delete_user))
         .route("/settings/users/:id/delete", get(handlers::settings::get_delete_user_modal))
+        .route("/settings/users/:id/deactivate", post(handlers::settings::post_deactivate_user))
+        .route("/settings/users/:id/reactivate", post(handlers::settings::post_reactivate_user))
         .route("/settings/users/:id/edit", get(handlers::settings::get_edit_user_modal)
                                           .post(handlers::settings::post_edit_user))
         // ── Transactions ──────────────────────────────────────────────────────
@@ -185,7 +187,10 @@ async fn main() -> anyhow::Result<()> {
         .nest_service("/static", ServeDir::new("static"))
         // Catch-all: redirect unknown routes to the 404 page.
         .fallback(handlers::handler_404)
-        // Redirects answering HTMX requests become HX-Redirect (see handlers::htmx_redirects).
+        // Sessions of deleted / deactivated users end (see handlers::require_active_user).
+        .layer(axum::middleware::from_fn_with_state(state.clone(), handlers::require_active_user))
+        // Redirects answering HTMX requests become HX-Redirect (see handlers::htmx_redirects);
+        // added after the layer above, so it also wraps it.
         .layer(axum::middleware::from_fn(handlers::htmx_redirects))
         // HTTP request/response tracing — logs method, path, status, latency
         .layer(

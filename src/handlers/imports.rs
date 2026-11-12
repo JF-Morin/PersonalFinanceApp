@@ -252,12 +252,11 @@ async fn insert_files_table(
                f.source_file,
                f.bank_id,
                b.name AS bank_name,
-               u.name || COALESCE(' ' || u.last_name, '') AS importer_name,
+               u.name || COALESCE(' ' || NULLIF(u.last_name, ''), '') AS importer_name,
                f.importer_id
         FROM imported_files f
         JOIN banks b ON f.bank_id = b.id
         JOIN users u ON f.importer_id = u.id
-        WHERE f.filename != 'manual'
         ORDER BY {order_by} {dir}, f.id DESC
         "#
     );
@@ -315,7 +314,6 @@ async fn insert_files_table(
 /// GET /imported-files — render the imported files list page.
 /// HTMX requests (search, filters, sorting, SSE refresh) get only the table fragment,
 /// which also updates the filter bar out-of-band.
-/// The synthetic "manual" row is excluded from the table (it's an implementation detail).
 pub async fn get_imported_files(
     State(state): State<AppState>,
     jar: SignedCookieJar,
@@ -354,7 +352,7 @@ pub async fn get_file_filters_modal(
     filter.retain_known(&banks, &users);
     // Years of the import dates in the user's time (stored in UTC).
     let imported: Vec<String> = sqlx::query_scalar(
-        "SELECT imported_at FROM imported_files WHERE filename != 'manual'",
+        "SELECT imported_at FROM imported_files",
     )
     .fetch_all(&state.db)
     .await?;
@@ -688,7 +686,7 @@ async fn duplicate_error(
         return Ok(Some(format!("Ce relevé a déjà été importé (contenu identique à « {} »).", existing)));
     }
     let same_name: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM imported_files WHERE filename != 'manual' AND LOWER(filename) = LOWER(?))",
+        "SELECT EXISTS (SELECT 1 FROM imported_files WHERE LOWER(filename) = LOWER(?))",
     )
     .bind(filename)
     .fetch_one(&mut *conn)
