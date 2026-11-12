@@ -10,7 +10,25 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # The image is only built when the tests pass. Tests that need real bank statements
+  # (git-ignored `test/` folder) are #[ignore]d and only run locally.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --locked
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

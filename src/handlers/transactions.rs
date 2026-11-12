@@ -1444,3 +1444,95 @@ pub async fn change_default_currency(state: &AppState, new_currency_id: i64) -> 
     tracing::info!(currency_id = %new_currency_id, transactions = %rows.len(), "Default currency changed");
     Ok(Ok(rows.len()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::change_default_currency;
+    use crate::test_support::*;
+
+    /// (amount_cents, currency_id, original_amount_cents, original_currency_id, exchange_rate)
+    async fn amounts(db: &crate::db::DbPool) -> Vec<(i64, i64, i64, i64, Option<f64>)> {
+        sqlx::query_as(
+            "SELECT amount_cents, currency_id, original_amount_cents, original_currency_id, exchange_rate \
+             FROM transactions ORDER BY id",
+        )
+        .fetch_all(db)
+        .await
+        .unwrap()
+    }
+
+    /// EUR → CAD → EUR converts from the originals each time: back in EUR, every amount
+    /// is exactly what it was, and the originals never change.
+    #[tokio::test]
+    async fn default_currency_round_trip_keeps_exact_cents() {
+        let app = test_app().await;
+        let db = &app.state.db;
+        let alice = add_user(db, "Alice").await;
+        // −100.00 € and −50.00 $ (= −45.00 € at 0.9).
+        add_transaction(db, NewTransaction::complete(alice, "2026-01-05", -10000, EUR)).await;
+        add_transaction(db, NewTransaction {
+            original_cents: -5000, original_currency: USD, rate: Some(0.9), amount_cents: -4500,
+            ..NewTransaction::complete(alice, "2026-01-05", 0, EUR)
+        }).await;
+        seed_rate(db, "EUR", "CAD", "2026-01-05", 1.5).await;
+        seed_rate(db, "USD", "CAD", "2026-01-05", 1.3).await;
+        seed_rate(db, "USD", "EUR", "2026-01-05", 0.9).await;
+        let before = amounts(db).await;
+
+        assert_eq!(change_default_currency(&app.state, CAD).await.unwrap(), Ok(2));
+        assert_eq!(
+            amounts(db).await,
+            vec![(-15000, CAD, -10000, EUR, Some(1.5)), (-6500, CAD, -5000, USD, Some(1.3))]
+        );
+        assert_eq!(crate::currency::default_currency_id(db).await, CAD);
+
+        assert_eq!(change_default_currency(&app.state, EUR).await.unwrap(), Ok(2));
+        assert_eq!(amounts(db).await, before);
+    }
+
+    /// One rate missing (the service can't be reached in tests): the change is refused and
+    /// nothing moves — amounts, currencies, and the setting.
+    #[tokio::test]
+    async fn missing_rate_changes_nothing() {
+        let app = test_app().await;
+        let db = &app.state.db;
+        let alice = add_user(db, "Alice").await;
+        add_transaction(db, NewTransaction::complete(alice, "2026-01-05", -10000, EUR)).await;
+        add_transaction(db, NewTransaction {
+            original_cents: -5000, original_currency: USD, rate: Some(0.9), amount_cents: -4500,
+            ..NewTransaction::complete(alice, "2026-01-06", 0, EUR)
+        }).await;
+        // EUR → CAD is known, USD → CAD isn't.
+        seed_rate(db, "EUR", "CAD", "2026-01-05", 1.5).await;
+        let before = amounts(db).await;
+
+        let result = change_default_currency(&app.state, CAD).await.unwrap();
+        assert!(result.is_err(), "the change should be refused: {:?}", result);
+        assert_eq!(amounts(db).await, before);
+        assert_eq!(crate::currency::default_currency_id(db).await, EUR);
+    }
+
+    /// A manual entry saved as broken because its rate was missing is repaired once a
+    /// conversion finds the rate.
+    #[tokio::test]
+    async fn broken_rate_is_repaired_by_a_conversion() {
+        let app = test_app().await;
+        let db = &app.state.db;
+        let alice = add_user(db, "Alice").await;
+        let id = add_transaction(db, NewTransaction {
+            original_cents: -5000, original_currency: USD, rate: None, amount_cents: 0, status: 3,
+            ..NewTransaction::complete(alice, "2026-01-05", 0, EUR)
+        }).await;
+        sqlx::query("UPDATE transactions SET parse_note = 'Taux de change introuvable' WHERE id = ?")
+            .bind(id).execute(db).await.unwrap();
+        add_shares(db, id, &[(alice, 100.0)]).await;
+        seed_rate(db, "USD", "CAD", "2026-01-05", 1.3).await;
+
+        assert_eq!(change_default_currency(&app.state, CAD).await.unwrap(), Ok(1));
+        let (amount, status, note): (i64, i64, Option<String>) =
+            sqlx::query_as("SELECT amount_cents, status_id, parse_note FROM transactions WHERE id = ?")
+                .bind(id).fetch_one(db).await.unwrap();
+        // Converted, note cleared, and complete (category + shares at 100 %).
+        assert_eq!((amount, status, note), (-6500, 2, None));
+    }
+}

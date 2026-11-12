@@ -52,6 +52,11 @@ impl RateSeries {
 /// series starts on the last working day before `start`, so every date in the range has a
 /// rate.
 async fn fetch_series(from_code: &str, to_code: &str, start: &str, end: &str) -> anyhow::Result<RateSeries> {
+    // Tests never call the rate service: they put the rates they need in `exchange_rates`,
+    // and a missing one behaves like the service being down.
+    if cfg!(test) {
+        bail!("no network in tests ({} → {} {}..{})", from_code, to_code, start, end);
+    }
     let url = format!("https://api.frankfurter.dev/v1/{}..{}?from={}&to={}", start, end, from_code, to_code);
     let resp: serde_json::Value = reqwest::Client::new()
         .get(&url)

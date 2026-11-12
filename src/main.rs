@@ -24,6 +24,8 @@ mod logs;
 mod models;
 mod parsers;
 mod sse;
+#[cfg(test)]
+mod test_support;
 
 use config::Config;
 use db::DbPool;

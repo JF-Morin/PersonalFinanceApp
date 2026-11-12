@@ -892,24 +892,33 @@ async fn safe_detect_and_parse(
         Ok(Ok(Ok(result))) => result?,
     };
 
-    let broken: Vec<&ParsedTransaction> = statement.transactions.iter().filter(|t| t.parse_note.is_some()).collect();
-    if !broken.is_empty() {
-        tracing::warn!(filename = %filename, broken = %broken.len(), "File rejected: broken lines");
-        let mut lines: Vec<String> = broken
-            .iter()
-            .take(5)
-            .map(|t| format!("• {} — {} ({})", t.date, t.operation, t.parse_note.as_deref().unwrap_or("")))
-            .collect();
-        if broken.len() > 5 {
-            lines.push(format!("• … et {} autre(s)", broken.len() - 5));
-        }
-        return Err(AppError::Other(format!(
-            "{} ligne(s) n'ont pas pu être lues entièrement : le fichier est refusé.\n{}",
-            broken.len(),
-            lines.join("\n")
-        )));
+    if let Err(msg) = reject_broken(&statement.transactions) {
+        tracing::warn!(filename = %filename, "File rejected: broken lines");
+        return Err(AppError::Other(msg));
     }
     Ok(statement)
+}
+
+/// A statement with any line the parser couldn't fully read is refused as a whole; `Err`
+/// lists (up to 5 of) those lines for the user.
+fn reject_broken(transactions: &[ParsedTransaction]) -> Result<(), String> {
+    let broken: Vec<&ParsedTransaction> = transactions.iter().filter(|t| t.parse_note.is_some()).collect();
+    if broken.is_empty() {
+        return Ok(());
+    }
+    let mut lines: Vec<String> = broken
+        .iter()
+        .take(5)
+        .map(|t| format!("• {} — {} ({})", t.date, t.operation, t.parse_note.as_deref().unwrap_or("")))
+        .collect();
+    if broken.len() > 5 {
+        lines.push(format!("• … et {} autre(s)", broken.len() - 5));
+    }
+    Err(format!(
+        "{} ligne(s) n'ont pas pu être lues entièrement : le fichier est refusé.\n{}",
+        broken.len(),
+        lines.join("\n")
+    ))
 }
 
 /// The parsing pipeline itself (blocking). Tries pdf_extract first; if it fails or panics
@@ -1157,23 +1166,7 @@ async fn reparse_inner(
     .bind(file_id)
     .fetch_all(&state.db)
     .await?;
-    let mut remaining: HashMap<(String, String, i64), usize> = HashMap::new();
-    for key in existing {
-        *remaining.entry(key).or_insert(0) += 1;
-    }
-    // Each parsed line uses up one matching stored transaction; once none is left, the
-    // line is missing (e.g. one of two identical lines was deleted) and is added again.
-    let missing: Vec<ParsedTransaction> = statement
-        .transactions
-        .into_iter()
-        .filter(|t| {
-            let key = (t.date.clone(), t.operation.clone(), to_cents(t.amount));
-            match remaining.get_mut(&key).filter(|c| **c > 0) {
-                Some(count) => { *count -= 1; false }
-                None => true,
-            }
-        })
-        .collect();
+    let missing = missing_lines(statement.transactions, existing);
     let added = missing.len() as i64;
     let skipped = (total - missing.len()) as i64;
 
@@ -1222,6 +1215,26 @@ async fn reparse_inner(
     }
 }
 
+/// The parsed lines that aren't in the DB any more. Each parsed line uses up one stored
+/// transaction with the same (date, operation, original amount in cents); once none is
+/// left, the line is missing (e.g. one of two identical lines was deleted).
+fn missing_lines(parsed: Vec<ParsedTransaction>, stored: Vec<(String, String, i64)>) -> Vec<ParsedTransaction> {
+    let mut remaining: HashMap<(String, String, i64), usize> = HashMap::new();
+    for key in stored {
+        *remaining.entry(key).or_insert(0) += 1;
+    }
+    parsed
+        .into_iter()
+        .filter(|t| {
+            let key = (t.date.clone(), t.operation.clone(), to_cents(t.amount));
+            match remaining.get_mut(&key).filter(|c| **c > 0) {
+                Some(count) => { *count -= 1; false }
+                None => true,
+            }
+        })
+        .collect()
+}
+
 /// Strip non-alphanumeric characters from a filename to prevent path traversal attacks.
 fn sanitize_filename(name: &str) -> String {
     name.chars()
@@ -1231,7 +1244,8 @@ fn sanitize_filename(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::check_pdf_upload;
+    use super::{check_pdf_upload, confirm_import_inner, missing_lines, reject_broken, ConfirmImportForm, PendingUpload};
+    use crate::{models::ParsedTransaction, test_support::*};
 
     const PDF: &[u8] = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n";
 
@@ -1253,5 +1267,135 @@ mod tests {
         assert!(check_pdf_upload("fake.pdf", b"<html><script>alert(1)</script></html>").is_err());
         assert!(check_pdf_upload("truncated.pdf", b"%PDF-1.7\n1 0 obj").is_err());
         assert!(check_pdf_upload(&format!("{}.pdf", "a".repeat(200)), PDF).is_err());
+    }
+
+    fn line(date: &str, operation: &str, amount: f64, parse_note: Option<&str>) -> ParsedTransaction {
+        ParsedTransaction {
+            date: date.into(),
+            transaction_date: date.into(),
+            operation: operation.into(),
+            amount,
+            parse_note: parse_note.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn a_broken_line_rejects_the_file() {
+        assert!(reject_broken(&[line("2026-01-05", "CB CAFE", -3.5, None)]).is_ok());
+        let err = reject_broken(&[
+            line("2026-01-05", "CB CAFE", -3.5, None),
+            line("2026-01-06", "VIR ???", 0.0, Some("montant illisible")),
+        ])
+        .unwrap_err();
+        assert!(err.starts_with("1 ligne(s)"), "{}", err);
+        assert!(err.contains("VIR ???") && err.contains("montant illisible"), "{}", err);
+    }
+
+    /// Two identical coffees on the statement, one deleted from the app: reparse adds
+    /// exactly one back; nothing when the app has them all (or more).
+    #[test]
+    fn reparse_finds_exactly_the_missing_lines() {
+        let parsed = || vec![line("2026-01-05", "CB CAFE", -3.5, None), line("2026-01-05", "CB CAFE", -3.5, None), line("2026-01-06", "LOYER", -800.0, None)];
+        let stored = |n: usize| {
+            let mut v = vec![("2026-01-06".to_string(), "LOYER".to_string(), -80000)];
+            v.extend(std::iter::repeat(("2026-01-05".to_string(), "CB CAFE".to_string(), -350)).take(n));
+            v
+        };
+        let missing = missing_lines(parsed(), stored(1));
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].operation, "CB CAFE");
+        assert!(missing_lines(parsed(), stored(2)).is_empty());
+        assert!(missing_lines(parsed(), stored(3)).is_empty());
+    }
+
+    fn upload(user_id: i64, filename: &str, content: &[u8]) -> PendingUpload {
+        use sha2::{Digest, Sha256};
+        PendingUpload {
+            user_id,
+            bank_id: 1,
+            bank_name: "BNP Paribas".into(),
+            currency_code: "EUR".into(),
+            filename: filename.into(),
+            content_hash: format!("{:x}", Sha256::digest(content)),
+            bytes: bytes::Bytes::copy_from_slice(content),
+            transactions: vec![line("2026-01-05", "CB CAFE", -3.5, None), line("2026-01-06", "SALAIRE", 2500.0, None)],
+            created: std::time::Instant::now(),
+        }
+    }
+
+    /// Confirm one analyzed upload (as the browser does with its token); `Err` = refused.
+    async fn confirm(app: &TestApp, user_id: i64, upload: PendingUpload) -> Result<serde_json::Value, String> {
+        let token = app.state.uploads.insert(upload);
+        let form = ConfirmImportForm { token };
+        match confirm_import_inner(app.state.clone(), jar_for(&app.state, user_id), form).await {
+            Ok(resp) => {
+                let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+                Ok(serde_json::from_slice(&body).unwrap())
+            }
+            Err(e) => Err(format!("{} [{}]", e.user_message(), e)),
+        }
+    }
+
+    async fn counts(app: &TestApp) -> (i64, i64) {
+        sqlx::query_as("SELECT (SELECT COUNT(*) FROM imported_files), (SELECT COUNT(*) FROM transactions)")
+            .fetch_one(&app.state.db)
+            .await
+            .unwrap()
+    }
+
+    fn stored_pdf(app: &TestApp, name: &str) -> std::path::PathBuf {
+        std::path::Path::new(&app.state.config.storage_path).join("Statements/BNP Paribas").join(name)
+    }
+
+    #[tokio::test]
+    async fn confirm_saves_the_file_and_its_transactions() {
+        let app = test_app().await;
+        let alice = add_user(&app.state.db, "Alice").await;
+        let json = confirm(&app, alice, upload(alice, "releve.pdf", b"%PDF-1 janvier %%EOF")).await.unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(counts(&app).await, (1, 2));
+        assert_eq!(std::fs::read(stored_pdf(&app, "releve.pdf")).unwrap(), b"%PDF-1 janvier %%EOF");
+        // Stored in cents, in EUR, pending.
+        let rows: Vec<(i64, i64, i64)> = sqlx::query_as("SELECT amount_cents, original_amount_cents, status_id FROM transactions ORDER BY id")
+            .fetch_all(&app.state.db).await.unwrap();
+        assert_eq!(rows, vec![(-350, -350, 1), (250000, 250000, 1)]);
+    }
+
+    /// Another statement with the same name is refused, and the first one's PDF is left
+    /// untouched (the old upload overwrote it). Same content under another name: refused.
+    #[tokio::test]
+    async fn duplicates_are_refused_and_nothing_is_written() {
+        let app = test_app().await;
+        let alice = add_user(&app.state.db, "Alice").await;
+        confirm(&app, alice, upload(alice, "releve.pdf", b"%PDF-1 janvier %%EOF")).await.unwrap();
+
+        let err = confirm(&app, alice, upload(alice, "RELEVE.pdf", b"%PDF-1 fevrier %%EOF")).await.unwrap_err();
+        assert!(err.contains("déjà été importé"), "{}", err);
+        let err = confirm(&app, alice, upload(alice, "copie.pdf", b"%PDF-1 janvier %%EOF")).await.unwrap_err();
+        assert!(err.contains("contenu identique"), "{}", err);
+
+        assert_eq!(counts(&app).await, (1, 2));
+        assert_eq!(std::fs::read(stored_pdf(&app, "releve.pdf")).unwrap(), b"%PDF-1 janvier %%EOF");
+        assert!(!stored_pdf(&app, "copie.pdf").exists());
+    }
+
+    /// A token works once, and only for the user who uploaded the file.
+    #[tokio::test]
+    async fn a_token_is_single_use_and_personal() {
+        let app = test_app().await;
+        let alice = add_user(&app.state.db, "Alice").await;
+        let bob = add_user(&app.state.db, "Bob").await;
+
+        let token = app.state.uploads.insert(upload(alice, "releve.pdf", b"%PDF-1 janvier %%EOF"));
+        let as_bob = confirm_import_inner(app.state.clone(), jar_for(&app.state, bob), ConfirmImportForm { token: token.clone() }).await;
+        assert!(as_bob.is_err());
+        assert_eq!(counts(&app).await, (0, 0));
+
+        // Bob's attempt didn't consume it: Alice can still confirm, once.
+        let first = confirm_import_inner(app.state.clone(), jar_for(&app.state, alice), ConfirmImportForm { token: token.clone() }).await;
+        assert!(first.is_ok());
+        let again = confirm_import_inner(app.state.clone(), jar_for(&app.state, alice), ConfirmImportForm { token }).await;
+        assert!(again.is_err());
+        assert_eq!(counts(&app).await, (1, 2));
     }
 }

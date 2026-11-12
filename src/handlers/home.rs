@@ -354,3 +354,72 @@ pub async fn get_chart_part(
     let html = state.tera.render("pages/home/_chart_part.html", &ctx)?;
     Ok(Html(html))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_balances, compute_chart_data};
+    use crate::test_support::*;
+
+    /// Alice pays 100 € shared 50/50, Bob pays 30 € entirely for Alice, Alice receives
+    /// 20 € shared 50/50: Bob owes Alice 50 − 30 − 10 = 10 €.
+    #[tokio::test]
+    async fn who_owes_whom() {
+        let app = test_app().await;
+        let db = &app.state.db;
+        let alice = add_user(db, "Alice").await;
+        let bob = add_user(db, "Bob").await;
+
+        let dinner = add_transaction(db, NewTransaction::complete(alice, "2026-01-05", -10000, EUR)).await;
+        add_shares(db, dinner, &[(alice, 50.0), (bob, 50.0)]).await;
+        let gift = add_transaction(db, NewTransaction::complete(bob, "2026-01-06", -3000, EUR)).await;
+        add_shares(db, gift, &[(alice, 100.0)]).await;
+        let refund = add_transaction(db, NewTransaction::complete(alice, "2026-01-07", 2000, EUR)).await;
+        add_shares(db, refund, &[(alice, 50.0), (bob, 50.0)]).await;
+        // Not counted: still pending, or in another currency than the default (EUR).
+        let pending = add_transaction(db, NewTransaction { status: 1, ..NewTransaction::complete(alice, "2026-01-08", -99900, EUR) }).await;
+        add_shares(db, pending, &[(bob, 100.0)]).await;
+        let other = add_transaction(db, NewTransaction::complete(alice, "2026-01-09", -88800, USD)).await;
+        add_shares(db, other, &[(bob, 100.0)]).await;
+
+        let balances = compute_balances(db, EUR).await.unwrap();
+        assert_eq!(balances.len(), 1);
+        let b = &balances[0];
+        assert_eq!((b.debtor.as_str(), b.creditor.as_str(), b.net_amount), ("Bob", "Alice", 10.0));
+        assert_eq!(b.currency_symbol, "€");
+        // Alice: −100 paid, +20 received; Bob: −30 paid.
+        assert_eq!((b.user1_total_debit, b.user1_total_credit, b.user2_total_debit), (-100.0, 20.0, -30.0));
+    }
+
+    #[tokio::test]
+    async fn balanced_when_even() {
+        let app = test_app().await;
+        let db = &app.state.db;
+        let alice = add_user(db, "Alice").await;
+        let bob = add_user(db, "Bob").await;
+        let a = add_transaction(db, NewTransaction::complete(alice, "2026-01-05", -4000, EUR)).await;
+        add_shares(db, a, &[(alice, 50.0), (bob, 50.0)]).await;
+        let b = add_transaction(db, NewTransaction::complete(bob, "2026-01-06", -4000, EUR)).await;
+        add_shares(db, b, &[(alice, 50.0), (bob, 50.0)]).await;
+
+        let balances = compute_balances(db, EUR).await.unwrap();
+        assert_eq!(balances[0].net_amount, 0.0);
+        assert_eq!(balances[0].debtor, "");
+    }
+
+    /// The chart counts spending only, per category, in the default currency.
+    #[tokio::test]
+    async fn chart_counts_spending_only() {
+        let app = test_app().await;
+        let db = &app.state.db;
+        let alice = add_user(db, "Alice").await;
+        // Category 1 = Alimentation, 10 = Revenus (migration 001).
+        add_transaction(db, NewTransaction::complete(alice, "2026-01-05", -1250, EUR)).await;
+        add_transaction(db, NewTransaction::complete(alice, "2026-01-06", -750, EUR)).await;
+        add_transaction(db, NewTransaction { category: Some(10), ..NewTransaction::complete(alice, "2026-01-07", 300000, EUR) }).await;
+        add_transaction(db, NewTransaction::complete(alice, "2026-01-08", -5000, USD)).await;
+
+        let (labels, totals) = compute_chart_data(db, EUR).await.unwrap();
+        assert_eq!(labels, vec!["Alimentation".to_string()]);
+        assert_eq!(totals, vec![20.0]);
+    }
+}

@@ -61,7 +61,7 @@ cargo run               # creates data/, storage/, logs/ automatically on first 
 # Build and run with Docker
 docker compose up --build
 
-# Run unit tests (parser logic — no server needed, no system deps)
+# Run the tests (no server, no network, no system deps; also run by CI before the image build)
 cargo test
 ```
 
@@ -201,6 +201,16 @@ cargo run       # data/, storage/, logs/ are created automatically on first run
    ```
 3. `docker compose up -d --build`
 4. Use the **Docker Compose Manager** plugin (or User Scripts) to auto-start on boot.
+
+## Tests
+
+`cargo test` runs in a few seconds, with no network: each test gets a temporary database with every migration applied (`src/test_support.rs`: `test_app()`, and builders for users, transactions, shares, known rates). The rate service is never called in tests (`currency::fetch_series` refuses): seed the rates a test needs with `seed_rate`; a missing one behaves like the service being down. The set is deliberately small, on what would fail silently:
+- balances and the chart (`handlers/home.rs`);
+- default-currency conversion: exact round trip, nothing changed when a rate is missing, broken rate repaired (`handlers/transactions.rs`);
+- imports: broken line rejects the file, duplicates refused with nothing written, single-use personal token, reparse matching (`handlers/imports.rs`);
+- migrations: an old (006) database with shares and manual entries keeps everything (`db.rs`) — extend it when a migration rebuilds a table.
+
+In test helpers, insert with `execute` + `last_insert_rowid()`: `INSERT … RETURNING` with `fetch_one` outside a DB transaction leaves the statement open on its pooled connection and the next write fails with "database is locked".
 
 ## Adding a new bank parser
 
