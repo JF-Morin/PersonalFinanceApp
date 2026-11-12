@@ -721,6 +721,10 @@ select.input {
 /* Danger zone (settings, admin only): a card with a red border, like GitHub's. */
 .card.danger-zone { border-color: #fca5a5; }
 .dark .card.danger-zone { border-color: #7f1d1d; }
-.danger-zone .danger-row { display: flex; align-items: center; gap: 1rem; justify-content: space-between; flex-wrap: wrap; }
+/* Each row: the text takes the remaining width and wraps; the button always stays on the
+   right, on the same line, at its natural width. */
+.danger-zone .danger-row { display: flex; align-items: center; gap: 1rem; }
+.danger-zone .danger-row > :first-child { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.danger-zone .danger-row > button { flex: 0 0 auto; margin-left: auto; white-space: nowrap; }
 .danger-zone .danger-row + .danger-row { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #fecaca; }
 .dark .danger-zone .danger-row + .danger-row { border-top-color: #7f1d1d; }
