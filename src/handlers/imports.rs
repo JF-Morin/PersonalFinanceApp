@@ -503,6 +503,11 @@ impl PendingUploads {
         token
     }
 
+    /// Forget every analyzed upload (application reset).
+    pub fn clear(&self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
     /// Take the upload out (a token works once), if it belongs to `user_id` and hasn't expired.
     fn take(&self, token: &str, user_id: i64) -> Option<PendingUpload> {
         let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());

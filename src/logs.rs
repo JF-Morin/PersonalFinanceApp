@@ -74,6 +74,41 @@ impl LogControl {
     }
 }
 
+impl LogControl {
+    /// The log files (`app.log.*`) with their size in bytes.
+    pub fn files(&self) -> Vec<(PathBuf, u64)> {
+        log_files(&self.dir)
+            .into_iter()
+            .map(|name| {
+                let path = self.dir.join(name);
+                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                (path, size)
+            })
+            .collect()
+    }
+
+    /// Delete every log file (admin, settings → danger zone). Today's file is the one being
+    /// written to: it is emptied rather than deleted, so logging goes on in it. Returns
+    /// (files deleted or emptied, bytes freed).
+    pub fn delete_all(&self) -> (usize, u64) {
+        let today = format!("{}{}", FILE_PREFIX, chrono::Utc::now().format("%Y-%m-%d"));
+        let (mut count, mut bytes) = (0, 0);
+        for (path, size) in self.files() {
+            let is_today = path.file_name().is_some_and(|n| n.to_string_lossy() == today);
+            let done = if is_today {
+                std::fs::OpenOptions::new().write(true).open(&path).and_then(|f| f.set_len(0))
+            } else {
+                std::fs::remove_file(&path)
+            };
+            match done {
+                Ok(()) => { count += 1; bytes += size; }
+                Err(e) => tracing::warn!(path = %path.display(), error = %e, "Could not delete log file"),
+            }
+        }
+        (count, bytes)
+    }
+}
+
 fn log_files(dir: &Path) -> Vec<String> {
     std::fs::read_dir(dir)
         .map(|entries| {
@@ -116,4 +151,43 @@ pub async fn start(db: &DbPool, control: std::sync::Arc<LogControl>) {
             control.prune(keep_days);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LogControl;
+
+    fn control(dir: &std::path::Path) -> LogControl {
+        let (_layer, handle) = tracing_subscriber::reload::Layer::new(tracing_subscriber::EnvFilter::new("off"));
+        LogControl::new(handle, dir)
+    }
+
+    /// Old log files are deleted, today's (still being written) is emptied, other files
+    /// in the folder are left alone.
+    #[test]
+    fn delete_all_keeps_todays_file_and_other_files() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let today = format!("app.log.{}", chrono::Utc::now().format("%Y-%m-%d"));
+        std::fs::write(dir.path().join("app.log.2020-01-01"), b"old").unwrap();
+        std::fs::write(dir.path().join(&today), b"today").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"mine").unwrap();
+
+        assert_eq!(control(dir.path()).delete_all(), (2, 8));
+        assert!(!dir.path().join("app.log.2020-01-01").exists());
+        assert_eq!(std::fs::read(dir.path().join(&today)).unwrap(), b"");
+        assert_eq!(std::fs::read(dir.path().join("notes.txt")).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn prune_keeps_the_last_days() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let day = |n: i64| format!("app.log.{}", (chrono::Utc::now().date_naive() - chrono::Duration::days(n)).format("%Y-%m-%d"));
+        for n in 0..5 {
+            std::fs::write(dir.path().join(day(n)), b"x").unwrap();
+        }
+        // 3 days kept: today and the 2 before.
+        assert_eq!(control(dir.path()).prune(3), 2);
+        assert!(dir.path().join(day(2)).exists() && !dir.path().join(day(3)).exists());
+        assert_eq!(control(dir.path()).prune(0), 0);
+    }
 }

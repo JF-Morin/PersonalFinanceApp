@@ -126,6 +126,52 @@
     </ul>
   </div>
 
+  {% if current_user.is_admin %}
+  <!-- Danger zone — admin only: the modal asks for a typed phrase and the password -->
+  <div class="card danger-zone">
+    <h2 class="text-base font-semibold mb-4 flex items-center gap-2 text-red-600 dark:text-red-400">
+      <i class="fas fa-triangle-exclamation"></i> Zone de danger
+    </h2>
+    <div class="danger-row">
+      <div class="text-sm">
+        <p class="font-semibold text-gray-900 dark:text-gray-100">Supprimer les sauvegardes</p>
+        <p class="text-gray-500 dark:text-gray-400">
+          Supprime toutes les sauvegardes de la base de données. Les sauvegardes automatiques continuent ensuite.
+        </p>
+      </div>
+      <button type="button" class="btn-danger"
+              hx-get="/settings/backups/delete" hx-target="#modal-root" hx-swap="innerHTML">
+        <i class="fas fa-box-archive"></i> Supprimer…
+      </button>
+    </div>
+    <div class="danger-row">
+      <div class="text-sm">
+        <p class="font-semibold text-gray-900 dark:text-gray-100">Supprimer les journaux</p>
+        <p class="text-gray-500 dark:text-gray-400">
+          Supprime tous les fichiers journaux (le journal du jour est vidé).
+        </p>
+      </div>
+      <button type="button" class="btn-danger"
+              hx-get="/settings/logs/delete" hx-target="#modal-root" hx-swap="innerHTML">
+        <i class="fas fa-file-lines"></i> Supprimer…
+      </button>
+    </div>
+    <div class="danger-row">
+      <div class="text-sm">
+        <p class="font-semibold text-gray-900 dark:text-gray-100">Réinitialiser l'application</p>
+        <p class="text-gray-500 dark:text-gray-400">
+          Supprime tous les utilisateurs, transactions et relevés importés, puis recommence à la création
+          du premier profil. Irréversible.
+        </p>
+      </div>
+      <button type="button" class="btn-danger"
+              hx-get="/settings/reset" hx-target="#modal-root" hx-swap="innerHTML">
+        <i class="fas fa-bomb"></i> Réinitialiser…
+      </button>
+    </div>
+  </div>
+  {% endif %}
+
 </div><!-- /space-y-6 -->
 </div><!-- /#settings-content -->
 {% endblock %}

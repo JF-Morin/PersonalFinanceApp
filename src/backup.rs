@@ -54,6 +54,33 @@ async fn prune(dir: &Path, keep: usize) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The backup files in `dir` (`finance_*.db`, the only files the app writes there), with
+/// their size in bytes.
+pub fn backup_files(dir: &Path) -> Vec<(PathBuf, u64)> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    entries
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.starts_with("finance_") && name.ends_with(".db")
+        })
+        .map(|e| (e.path(), e.metadata().map(|m| m.len()).unwrap_or(0)))
+        .collect()
+}
+
+/// Delete every backup in `dir` (admin, settings → danger zone). Other files in the
+/// folder are left alone. Returns (files deleted, bytes freed).
+pub fn delete_all(dir: &Path) -> (usize, u64) {
+    let (mut count, mut bytes) = (0, 0);
+    for (path, size) in backup_files(dir) {
+        match std::fs::remove_file(&path) {
+            Ok(()) => { count += 1; bytes += size; }
+            Err(e) => tracing::warn!(path = %path.display(), error = %e, "Could not delete backup"),
+        }
+    }
+    (count, bytes)
+}
+
 /// Startup backup + a background task repeating it every `backup_interval_hours`.
 /// A failed backup is logged; it never stops the app.
 pub async fn start(db: &DbPool, config: &Config) {
@@ -77,4 +104,24 @@ pub async fn start(db: &DbPool, config: &Config) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    /// Only the app's backups (`finance_*.db`) are deleted.
+    #[test]
+    fn delete_all_only_deletes_backups() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("finance_20260101_120000.db"), b"12345").unwrap();
+        std::fs::write(dir.path().join("finance_20260102_120000.db"), b"123").unwrap();
+        std::fs::write(dir.path().join("finance.db"), b"live").unwrap();
+        std::fs::write(dir.path().join("readme.txt"), b"mine").unwrap();
+
+        assert_eq!(super::backup_files(dir.path()).len(), 2);
+        assert_eq!(super::delete_all(dir.path()), (2, 8));
+        let mut left: Vec<String> = std::fs::read_dir(dir.path()).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        left.sort();
+        assert_eq!(left, vec!["finance.db".to_string(), "readme.txt".to_string()]);
+    }
 }

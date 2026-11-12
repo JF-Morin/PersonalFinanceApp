@@ -1,0 +1,42 @@
+{#
+  Rendered alone by GET /settings/reset into #modal-root (admin only). Like GitHub's
+  dangerous actions: the button stays disabled until the phrase is typed exactly, and the
+  admin's password is required too (both checked again by POST /settings/reset). Errors
+  are swapped into #reset-error; success answers with HX-Redirect to /login (first run).
+#}
+{% set modal_title = "Réinitialiser l'application ?" %}{% set modal_icon = "fa-bomb" %}{% set modal_tone = "danger" %}
+{% set modal_subtitle = "Cette action est irréversible" %}
+<div class="modal-sheet card w-full" style="--modal-width: 32rem" x-data="{ typed: '', password: '' }">
+  {% include "modal/_header.html" %}
+  <form hx-post="/settings/reset" hx-swap="none" hx-disabled-elt="find button[type=submit]" class="space-y-4">
+    <div class="notice notice-error text-sm">
+      <p class="notice-title"><i class="fas fa-circle-exclamation"></i> Tout sera supprimé</p>
+      <ul class="list-disc pl-5 space-y-0.5">
+        <li>{{ counts.users }} utilisateur(s), vous compris</li>
+        <li>{{ counts.transactions }} transaction(s) et leurs parts</li>
+        <li>{{ counts.files }} relevé(s) importé(s), fichiers PDF compris</li>
+        <li>les préférences et les taux de change enregistrés</li>
+      </ul>
+      <p class="notice-hint"><i class="fas fa-shield-halved"></i> Une sauvegarde de la base est écrite juste avant
+        (dossier des sauvegardes) ; supprimez-la si vous ne voulez rien garder. Les catégories, devises et banques restent.</p>
+    </div>
+    <p class="text-sm text-gray-600 dark:text-gray-300">
+      Vous serez déconnecté et l'application recommencera à la création du premier profil.
+    </p>
+    <div>
+      <label class="label">Pour confirmer, tapez <strong class="font-mono">{{ phrase }}</strong></label>
+      <input name="phrase" x-model="typed" autocomplete="off" spellcheck="false" class="input font-mono">
+    </div>
+    <div>
+      <label class="label">Votre mot de passe</label>
+      <input name="password" type="password" x-model="password" autocomplete="current-password" class="input">
+    </div>
+    <div class="modal-error" id="reset-error"></div>
+    <div class="modal-footer">
+      <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+      <button type="submit" class="btn-danger" :disabled="typed.trim() !== {{ phrase | json_encode() }} || !password">
+        <i class="fas fa-bomb"></i> Tout supprimer
+      </button>
+    </div>
+  </form>
+</div>

@@ -717,3 +717,10 @@ select.input {
 .choice input:focus-visible + span { outline: 2px solid #4f46e5; outline-offset: 2px; }
 .dark .choice span { border-color: #475569; background: #1e293b; color: #e2e8f0; }
 .dark .choice input:checked + span { background: #6366f1; border-color: #6366f1; color: #fff; }
+
+/* Danger zone (settings, admin only): a card with a red border, like GitHub's. */
+.card.danger-zone { border-color: #fca5a5; }
+.dark .card.danger-zone { border-color: #7f1d1d; }
+.danger-zone .danger-row { display: flex; align-items: center; gap: 1rem; justify-content: space-between; flex-wrap: wrap; }
+.danger-zone .danger-row + .danger-row { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #fecaca; }
+.dark .danger-zone .danger-row + .danger-row { border-top-color: #7f1d1d; }

@@ -1,0 +1,33 @@
+{#
+  Rendered alone by GET /settings/backups/delete and GET /settings/logs/delete into
+  #modal-root (admin only). Same confirmation as the reset (modal/reset.html): the button
+  stays disabled until `phrase` is typed exactly and the password is filled in; both are
+  checked again by the POST. Errors go to #danger-files-error; success: toast + close.
+  Expects title, icon, url, what, note, count, size, phrase.
+#}
+{% set modal_title = title %}{% set modal_icon = icon %}{% set modal_tone = "danger" %}
+{% set modal_subtitle = "Cette action est irréversible" %}
+<div class="modal-sheet card w-full" style="--modal-width: 32rem" x-data="{ typed: '', password: '' }">
+  {% include "modal/_header.html" %}
+  <form hx-post="{{ url }}" hx-swap="none" hx-disabled-elt="find button[type=submit]" class="space-y-4">
+    <div class="notice notice-error text-sm">
+      <p class="notice-title"><i class="fas fa-circle-exclamation"></i> {{ count }} {{ what }} — {{ size }}</p>
+      <p>{{ note }}</p>
+    </div>
+    <div>
+      <label class="label">Pour confirmer, tapez <strong class="font-mono">{{ phrase }}</strong></label>
+      <input name="phrase" x-model="typed" autocomplete="off" spellcheck="false" class="input font-mono">
+    </div>
+    <div>
+      <label class="label">Votre mot de passe</label>
+      <input name="password" type="password" x-model="password" autocomplete="current-password" class="input">
+    </div>
+    <div class="modal-error" id="danger-files-error"></div>
+    <div class="modal-footer">
+      <button type="button" @click="close()" class="btn-secondary">Annuler</button>
+      <button type="submit" class="btn-danger" :disabled="typed.trim() !== {{ phrase | json_encode() }} || !password">
+        <i class="fas fa-trash-can"></i> Supprimer
+      </button>
+    </div>
+  </form>
+</div>
