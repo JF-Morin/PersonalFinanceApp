@@ -20,6 +20,7 @@ mod currency;
 mod db;
 mod error;
 mod handlers;
+mod logs;
 mod models;
 mod parsers;
 mod sse;
@@ -46,6 +47,8 @@ pub struct AppState {
     pub cookie_key: Key,
     /// Analyzed PDFs waiting for their import confirmation (`handlers::imports`).
     pub uploads: Arc<handlers::imports::PendingUploads>,
+    /// Live log level and log retention (admin settings, `logs.rs`).
+    pub logs: Arc<logs::LogControl>,
 }
 
 /// Lets the `SignedCookieJar` extractor find the signing key in the app state.
@@ -71,8 +74,10 @@ async fn main() -> anyhow::Result<()> {
     let (non_blocking_file, _guard) = tracing_appender::non_blocking(file_appender);
     // _guard must stay alive for the whole program — dropping it flushes and stops the writer
 
-    let log_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "personal_finance_app=debug,tower_http=info".into());
+    // RUST_LOG (or the built-in default) until the admin's saved level is applied, once
+    // the DB is open (`logs::start`). The reload handle lets that level change at runtime.
+    let (log_filter, log_reload) = tracing_subscriber::reload::Layer::new(logs::env_filter());
+    let log_control = Arc::new(logs::LogControl::new(log_reload, &config.log_path));
 
     tracing_subscriber::registry()
         .with(log_filter)
@@ -106,6 +111,8 @@ async fn main() -> anyhow::Result<()> {
     // Back up before migrations, so an update can be rolled back to the schema it started from.
     backup::start(&db, &config).await;
     db::run_migrations(&db).await?;
+    // Admin log settings: saved level, and deletion of old log files.
+    logs::start(&db, log_control.clone()).await;
 
     // ── Templates ─────────────────────────────────────────────────────────────
     // `Tera::new` compiles all templates from the glob at startup — a parse error here
@@ -128,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
         // Key needs 64 bytes; SHA-512 stretches the (≥ 32-byte) secret to exactly that.
         cookie_key: Key::from(&<sha2::Sha512 as sha2::Digest>::digest(config.cookie_secret.as_bytes())),
         uploads: Arc::new(handlers::imports::PendingUploads::default()),
+        logs: log_control,
     };
 
     // ── Router ─────────────────────────────────────────────────────────────────
@@ -144,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
         // ── Settings ──────────────────────────────────────────────────────────
         .route("/settings",                get(handlers::settings::get_settings)
                                           .post(handlers::settings::post_settings))
+        .route("/settings/logs",           post(handlers::settings::post_log_settings))
         .route("/settings/users",          get(handlers::settings::get_users_table)
                                           .post(handlers::settings::post_new_user))
         .route("/settings/users/:id",      delete(handlers::settings::delete_user))

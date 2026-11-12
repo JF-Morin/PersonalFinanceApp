@@ -120,7 +120,7 @@ Amounts are integer cents (`*_cents` columns; `currency::to_cents` / `from_cents
 - `exchange_rate` — original → `currency_id` at the transaction date (1 when the same); `NULL` = no rate found (the transaction is broken; saving it again retries the rate).
 - `amount_cents` / `currency_id` — the value in the default currency, used by balances, chart, filters and sorting.
 
-Rates come from Frankfurter (`currency::Rates::fetch`: one request per currency for the whole date range; weekends/holidays use the last working day), always before `begin()`. A statement whose currency isn't the default is converted at import (a missing rate rejects the file); a manual entry without a rate is saved as broken. Changing the default currency (`transactions::change_default_currency`, from `POST /settings`) recomputes every `amount_cents` from the originals in one DB transaction — if any rate is missing, nothing changes (theme included) and the error is shown.
+Rates come from Frankfurter (`currency::Rates::fetch`: one request per currency for the whole date range; weekends/holidays use the last working day), always before `begin()`. Every final rate (one published on or after its date) is kept in `exchange_rates` (migration 010), so a (currency pair, date) already seen is never fetched again — repeat conversions are instant and work while the service is down. A statement whose currency isn't the default is converted at import (a missing rate rejects the file); a manual entry without a rate is saved as broken. Changing the default currency (`transactions::change_default_currency`, from `POST /settings`) recomputes every `amount_cents` from the originals in one DB transaction — if any rate is missing, nothing changes (theme included) and the error is shown.
 
 ### Balance calculation
 The home page uses `complete` transactions in the default currency only (the chart: spending only, negative amounts), and says which currency the amounts are in; transactions still in another currency (from before conversions existed) are counted in a notice, and saving the preferences converts them. For each pair of users it sums what each one paid on the other's behalf (via `transaction_shares`) and shows who owes whom. The stats row, balances card and chart each have their own partial endpoint (`/home/stats-row`, `/home/balances`, `/home/chart-part`) refreshed over SSE.
@@ -155,12 +155,15 @@ CSS lives in `static/` (`app.css`, `components.css`, `transactions.css`, `login.
 Writes that take more than one statement run in one DB transaction (`state.db.begin()` … `tx.commit()`), so a failure leaves nothing half-written: transaction edit/carousel save (row + shares + status), manual add, PDF import confirm, reparse, file delete (the PDF on disk is removed only after commit), preferences. Helpers used inside them take `&mut SqliteConnection` (`replace_shares`, `recalculate_status`) or any executor (`db::set_setting`). Network calls (exchange rates) happen before `begin()`, never while the DB is locked.
 
 
+**Logs** (`src/logs.rs`): the admin sets the log level and how many days of logs to keep in Paramètres → Journaux (`POST /settings/logs`). The level applies at once (a `tracing_subscriber::reload` filter; "par défaut" = `RUST_LOG`); daily files `app.log.YYYY-MM-DD` older than that are deleted at startup, every 6 hours and on save (0 = keep all; default 30).
+
 **Backups** (`src/backup.rs`): the app writes a consistent snapshot (`VACUUM INTO`, safe in WAL mode and while running) to `BACKUP_DIR` at startup — before migrations — and every `BACKUP_INTERVAL_HOURS`, keeping the `BACKUP_KEEP` newest `finance_YYYYMMDD_HHMMSS.db`. To restore: stop the app, replace `finance.db` with a backup (delete any `finance.db-wal`/`-shm`), start it. `scripts/backup-db.sh` makes an extra manual copy.
 
-Migrations are in `migrations/` (`001_initial` … `009_user_active`) and embedded in the binary via `sqlx::migrate!()`. sqlx runs each migration inside a DB transaction, where `PRAGMA foreign_keys = OFF` has no effect: a migration that rebuilds `transactions` must set `transaction_shares` aside first (as 007 and 008 do), or the `ON DELETE CASCADE` deletes every share. Schema overview:
+Migrations are in `migrations/` (`001_initial` … `010_exchange_rates`) and embedded in the binary via `sqlx::migrate!()`. sqlx runs each migration inside a DB transaction, where `PRAGMA foreign_keys = OFF` has no effect: a migration that rebuilds `transactions` must set `transaction_shares` aside first (as 007 and 008 do), or the `ON DELETE CASCADE` deletes every share. Schema overview:
 
 - `users`, `banks`, `currencies`, `categories`, `transaction_status` — reference tables
-- `settings` — key/value store for app preferences (theme, default currency)
+- `settings` — key/value store for app preferences (theme, default currency) and the admin's log settings (`log_level`, `log_keep_days`)
+- `exchange_rates` — rates already fetched, by (from, to, date)
 - `imported_files` — one row per imported PDF
 - `transactions` — one row per transaction; `from_file_id` links to `imported_files` (`NULL` = manual transaction); amounts in cents, original + converted (see **Money and currencies**)
 - `transaction_shares` — per-user percentage of each transaction

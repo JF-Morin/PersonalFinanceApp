@@ -17,6 +17,38 @@
   <!-- App preferences — explicit save -->
   {% include "pages/settings/_preferences.html" %}
 
+  {% if current_user.is_admin %}
+  <!-- Logs — admin only (POST /settings/logs, applied at once) -->
+  <div class="card">
+    <h2 class="text-base font-semibold mb-5 flex items-center gap-2 text-gray-900 dark:text-gray-100">
+      <i class="fas fa-file-lines text-primary-600"></i> Journaux
+      <span class="text-xs text-gray-400 font-normal">(administrateur)</span>
+    </h2>
+    <form hx-post="/settings/logs" hx-swap="none" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="label">Niveau de détail</label>
+        <select name="log_level" class="input">
+          <option value="" {% if not log_level %}selected{% endif %}>Par défaut (variable RUST_LOG)</option>
+          {% for l in log_levels %}
+          <option value="{{ l }}" {% if l == log_level %}selected{% endif %}>
+            {% if l == "error" %}Erreurs seulement{% elif l == "warn" %}Avertissements{% elif l == "info" %}Informations (recommandé){% elif l == "debug" %}Débogage{% else %}Tout (très détaillé){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Appliqué immédiatement, sans redémarrage.</p>
+      </div>
+      <div>
+        <label class="label">Conserver les journaux (jours)</label>
+        <input type="number" name="log_keep_days" min="0" max="3650" required value="{{ log_keep_days }}" class="input">
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Les fichiers plus anciens sont supprimés. 0 = tout conserver.</p>
+      </div>
+      <div class="sm:col-span-2">
+        <button type="submit" class="btn-primary"><i class="fas fa-check"></i> Enregistrer</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
   <!-- Users -->
   <div class="card">
     <h2 class="text-base font-semibold mb-5 flex items-center gap-2 text-gray-900 dark:text-gray-100">

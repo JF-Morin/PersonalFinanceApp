@@ -15,7 +15,8 @@ services:
       # Local time zone (today's date, current year, backup names). Without it: UTC.
       TZ: ${TZ:-America/Toronto}
       COOKIE_SECRET: ${COOKIE_SECRET:-change-this-in-production-32bytes!!}
-      # Override log verbosity if needed: RUST_LOG=personal_finance_app=trace,tower_http=debug
+      # Starting log verbosity (the admin can change it in Paramètres → Journaux):
+      # RUST_LOG=personal_finance_app=trace,tower_http=debug
       RUST_LOG: ${RUST_LOG:-personal_finance_app=debug,tower_http=info}
       # Database backups (see src/backup.rs): at startup, then every BACKUP_INTERVAL_HOURS.
       # Tip: keep them on another disk than the database — e.g. add a volume

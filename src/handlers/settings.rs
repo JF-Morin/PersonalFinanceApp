@@ -58,6 +58,11 @@ pub async fn get_settings(
     ctx.insert("banks", &banks);
     ctx.insert("users", &users);
     ctx.insert("default_currency_id", &default_currency_id);
+    // Admin only: log level and retention.
+    let (log_level, log_keep_days) = crate::logs::saved(&state.db).await;
+    ctx.insert("log_levels", &crate::logs::LEVELS);
+    ctx.insert("log_level", &log_level);
+    ctx.insert("log_keep_days", &log_keep_days);
     // Messages after a plain (non-HTMX) form post redirected back here.
     let flash = match (query.pw_error.as_deref(), query.user_error.as_deref()) {
         (Some("wrong"), _) => Some("Mot de passe actuel incorrect."),
@@ -136,6 +141,47 @@ pub async fn post_settings(
     } else {
         Ok(Redirect::to("/settings").into_response())
     }
+}
+
+/// Form of the admin's "Journaux" card.
+#[derive(Deserialize)]
+pub struct LogSettingsForm {
+    /// One of `logs::LEVELS`, or "" for the default (`RUST_LOG`).
+    pub log_level: String,
+    pub log_keep_days: String,
+}
+
+/// POST /settings/logs — the log level and how many days of logs to keep (admin only).
+/// Both apply at once: the new level without a restart, older log files deleted now.
+pub async fn post_log_settings(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Form(form): Form<LogSettingsForm>,
+) -> AppResult<axum::response::Response> {
+    let viewer = require_admin(&jar, &state.db).await?;
+    let level = form.log_level.trim();
+    if !level.is_empty() && !crate::logs::LEVELS.contains(&level) {
+        return Err(AppError::Other("Niveau de journalisation inconnu.".into()));
+    }
+    let keep_days: u32 = match form.log_keep_days.trim().parse() {
+        Ok(n) if n <= 3650 => n,
+        _ => return Err(AppError::Other("Durée de conservation invalide (0 à 3650 jours).".into())),
+    };
+
+    let mut tx = state.db.begin().await?;
+    set_setting(&mut *tx, "log_level", level).await?;
+    set_setting(&mut *tx, "log_keep_days", &keep_days.to_string()).await?;
+    tx.commit().await?;
+    state.logs.set_level(level).map_err(|e| AppError::Other(e.to_string()))?;
+    let deleted = state.logs.prune(keep_days);
+    tracing::info!(by = %viewer.id, level = %level, keep_days, "Log settings changed");
+
+    let msg = if deleted > 0 {
+        format!("Journaux enregistrés — {} ancien(s) fichier(s) supprimé(s).", deleted)
+    } else {
+        "Journaux enregistrés.".to_string()
+    };
+    Ok(toast_response(&msg, true, &[]))
 }
 
 /// `bank_id` from a form select: "" ("— Aucune —") or anything unparsable means no bank.
@@ -449,7 +495,7 @@ async fn hand_over_admin(conn: &mut sqlx::SqliteConnection, leaving_id: i64) -> 
 async fn require_admin(jar: &SignedCookieJar, db: &crate::db::DbPool) -> AppResult<User> {
     let viewer = super::get_current_user(jar, db).await?;
     if !viewer.is_admin {
-        return Err(AppError::Other("Seul l'administrateur peut désactiver ou supprimer des utilisateurs.".into()));
+        return Err(AppError::Other("Réservé à l'administrateur.".into()));
     }
     Ok(viewer)
 }

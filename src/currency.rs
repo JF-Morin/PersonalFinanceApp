@@ -6,8 +6,10 @@
 ///
 /// Rates come from the Frankfurter API (European Central Bank rates, published on working
 /// days only). They are fetched up front — one request per currency for the whole date
-/// range needed — and never while a DB transaction is open.
-use std::collections::{BTreeMap, HashMap};
+/// range needed — and never while a DB transaction is open. Every final rate fetched is
+/// kept in `exchange_rates` (migration 010), so a (currency, date) already seen is never
+/// asked again.
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use anyhow::{anyhow, bail, Context};
 
@@ -37,6 +39,13 @@ impl RateSeries {
     fn on(&self, date: &str) -> Option<f64> {
         self.0.range(..=date.to_string()).next_back().map(|(_, r)| *r)
     }
+
+    /// The rate of `date` can't change any more: a rate was published on that date or a
+    /// later one. (Today before the ECB publishes, or a weekend at the end of the series,
+    /// still use an earlier rate that the next publication would replace.)
+    fn is_final(&self, date: &str) -> bool {
+        self.0.range(date.to_string()..).next().is_some()
+    }
 }
 
 /// Rates from `from_code` to `to_code` for every working day from `start` to `end`. The
@@ -65,49 +74,115 @@ async fn fetch_series(from_code: &str, to_code: &str, start: &str, end: &str) ->
     Ok(RateSeries(series))
 }
 
-/// Rates from any currency to one target currency, fetched once for a set of
-/// (currency, date) pairs.
+/// Rates from any currency to one target currency, for a set of (currency, date) pairs:
+/// from `exchange_rates` when already known, otherwise fetched (and then stored).
 pub struct Rates {
     to_id: i64,
-    series: HashMap<i64, RateSeries>,
+    /// (currency id, date) → rate.
+    rates: HashMap<(i64, String), f64>,
 }
 
 impl Rates {
-    /// Fetch the rates to `to_id` that `needs` (currency id, date) require: one request
-    /// per currency other than `to_id`. Fails if a currency has no ISO code or a request
-    /// fails, naming the currency.
+    /// The rates to `to_id` that `needs` (currency id, date) require. For each currency
+    /// other than `to_id`, the dates not in `exchange_rates` are fetched in one request.
+    /// Fails if a currency has no ISO code or a needed request fails, naming the currency.
     pub async fn fetch(db: &DbPool, to_id: i64, needs: &[(i64, String)]) -> anyhow::Result<Rates> {
-        // Date range needed per currency.
-        let mut ranges: HashMap<i64, (String, String)> = HashMap::new();
+        let mut dates: HashMap<i64, BTreeSet<String>> = HashMap::new();
         for (currency_id, date) in needs.iter().filter(|(c, _)| *c != to_id) {
-            let range = ranges.entry(*currency_id).or_insert_with(|| (date.clone(), date.clone()));
-            if *date < range.0 { range.0 = date.clone(); }
-            if *date > range.1 { range.1 = date.clone(); }
+            dates.entry(*currency_id).or_default().insert(date.clone());
         }
-        let mut series = HashMap::new();
-        if ranges.is_empty() {
-            return Ok(Rates { to_id, series });
+        let mut rates = HashMap::new();
+        if dates.is_empty() {
+            return Ok(Rates { to_id, rates });
         }
         let to_code = currency_code(db, to_id).await?;
-        for (currency_id, (start, end)) in ranges {
+        for (currency_id, dates) in dates {
             let from_code = currency_code(db, currency_id).await?;
-            let rates = fetch_series(&from_code, &to_code, &start, &end)
+            let (first, last) = (dates.first().unwrap().clone(), dates.last().unwrap().clone());
+
+            // Already known.
+            let known: Vec<(String, f64)> = sqlx::query_as(
+                "SELECT date, rate FROM exchange_rates \
+                 WHERE from_code = ? AND to_code = ? AND date BETWEEN ? AND ?",
+            )
+            .bind(&from_code)
+            .bind(&to_code)
+            .bind(&first)
+            .bind(&last)
+            .fetch_all(db)
+            .await?;
+            let known: HashMap<String, f64> = known.into_iter().collect();
+            let missing: Vec<&String> = dates.iter().filter(|d| !known.contains_key(*d)).collect();
+            for (date, rate) in known.into_iter().filter(|(d, _)| dates.contains(d)) {
+                rates.insert((currency_id, date), rate);
+            }
+            if missing.is_empty() {
+                tracing::debug!(from = %from_code, to = %to_code, dates = dates.len(), "Exchange rates all known");
+                continue;
+            }
+
+            // The rest: one request covering them — and a week beyond the last one (up to
+            // today), so a weekend or holiday is seen to be followed by a published rate:
+            // its rate is then final and can be stored.
+            let start = missing[0].as_str();
+            let last = missing[missing.len() - 1].as_str();
+            let today = chrono::Utc::now().date_naive();
+            let end = chrono::NaiveDate::parse_from_str(last, "%Y-%m-%d")
+                .map(|d| (d + chrono::Duration::days(7)).min(today).max(d))
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|_| last.to_string());
+            let series = fetch_series(&from_code, &to_code, start, &end)
                 .await
                 .with_context(|| format!("taux {} → {} introuvables", from_code, to_code))?;
-            tracing::info!(from = %from_code, to = %to_code, start = %start, end = %end, days = rates.0.len(), "Exchange rates fetched");
-            series.insert(currency_id, rates);
+            let mut to_store: Vec<(&str, f64)> = Vec::new();
+            for date in &missing {
+                if let Some(rate) = series.on(date) {
+                    rates.insert((currency_id, date.to_string()), rate);
+                    if series.is_final(date) {
+                        to_store.push((date.as_str(), rate));
+                    }
+                }
+            }
+            tracing::info!(
+                from = %from_code, to = %to_code, start = %start, end = %end,
+                known = dates.len() - missing.len(), fetched = missing.len(), stored = to_store.len(),
+                "Exchange rates fetched"
+            );
+            // Keeping them is an optimisation: a failure is logged, the conversion goes on.
+            if let Err(e) = store(db, &from_code, &to_code, &to_store).await {
+                tracing::warn!(error = %e, "Could not store exchange rates");
+            }
         }
-        Ok(Rates { to_id, series })
+        Ok(Rates { to_id, rates })
     }
 
     /// The rate from `currency_id` to the target currency on `date` (1 for the target
-    /// itself); `None` if it wasn't fetched.
+    /// itself); `None` if it wasn't found.
     pub fn rate(&self, currency_id: i64, date: &str) -> Option<f64> {
         if currency_id == self.to_id {
             return Some(1.0);
         }
-        self.series.get(&currency_id)?.on(date)
+        self.rates.get(&(currency_id, date.to_string())).copied()
     }
+}
+
+/// Keep final rates in `exchange_rates` (one DB transaction).
+async fn store(db: &DbPool, from_code: &str, to_code: &str, rates: &[(&str, f64)]) -> anyhow::Result<()> {
+    if rates.is_empty() {
+        return Ok(());
+    }
+    let mut tx = db.begin().await?;
+    for (date, rate) in rates {
+        sqlx::query("INSERT OR IGNORE INTO exchange_rates (from_code, to_code, date, rate) VALUES (?, ?, ?, ?)")
+            .bind(from_code)
+            .bind(to_code)
+            .bind(date)
+            .bind(rate)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// ISO 4217 code of a currency (the one Frankfurter knows it by).
@@ -162,5 +237,9 @@ mod tests {
         assert_eq!(series.on("2026-01-04"), Some(0.85)); // Sunday → Friday
         assert_eq!(series.on("2026-01-09"), Some(0.86));
         assert_eq!(series.on("2025-12-31"), None);
+        // Final once a rate exists on or after the date.
+        assert!(series.is_final("2026-01-02"));
+        assert!(series.is_final("2026-01-04"));
+        assert!(!series.is_final("2026-01-09"));
     }
 }
