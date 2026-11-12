@@ -159,7 +159,7 @@ Writes that take more than one statement run in one DB transaction (`state.db.be
 
 **Backups** (`src/backup.rs`): the app writes a consistent snapshot (`VACUUM INTO`, safe in WAL mode and while running) to `BACKUP_DIR` at startup — before migrations — and every `BACKUP_INTERVAL_HOURS`, keeping the `BACKUP_KEEP` newest `finance_YYYYMMDD_HHMMSS.db`. To restore: stop the app, replace `finance.db` with a backup (delete any `finance.db-wal`/`-shm`), start it. `scripts/backup-db.sh` makes an extra manual copy.
 
-Migrations are in `migrations/` (`001_initial` … `010_exchange_rates`) and embedded in the binary via `sqlx::migrate!()`. sqlx runs each migration inside a DB transaction, where `PRAGMA foreign_keys = OFF` has no effect: a migration that rebuilds `transactions` must set `transaction_shares` aside first (as 007 and 008 do), or the `ON DELETE CASCADE` deletes every share. Schema overview:
+Migrations are in `migrations/` (`001_initial` … `011_categories`) and embedded in the binary via `sqlx::migrate!()`. sqlx runs each migration inside a DB transaction, where `PRAGMA foreign_keys = OFF` has no effect: a migration that rebuilds `transactions` must set `transaction_shares` aside first (as 007 and 008 do), or the `ON DELETE CASCADE` deletes every share. Schema overview:
 
 - `users`, `banks`, `currencies`, `categories`, `transaction_status` — reference tables
 - `settings` — key/value store for app preferences (theme, default currency) and the admin's log settings (`log_level`, `log_keep_days`)

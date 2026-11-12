@@ -55,7 +55,7 @@ pub struct Currency {
     pub code: String,
 }
 
-/// User-defined spending category (Alimentation, Transport, …).
+/// Spending category (Alimentation, Transport, …; the list is in migration 011).
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct Category {
     pub id: i64,

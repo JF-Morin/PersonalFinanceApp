@@ -327,7 +327,7 @@ fn filter_and_sort(mut views: Vec<TransactionView>, filter: &TransactionFilter) 
         let ord = match col {
             "source" => a.is_manual.cmp(&b.is_manual),
             "operation" => a.operation.to_lowercase().cmp(&b.operation.to_lowercase()),
-            "category" => lower(a.category_name.as_deref()).cmp(&lower(b.category_name.as_deref())),
+            "category" => sort_key(a.category_name.as_deref().unwrap_or("")).cmp(&sort_key(b.category_name.as_deref().unwrap_or(""))),
             "owner" => a.owner_name.to_lowercase().cmp(&b.owner_name.to_lowercase()),
             "participants" => participants_key(a).cmp(&participants_key(b)),
             "note" => lower(a.notes.as_deref()).cmp(&lower(b.notes.as_deref())),
@@ -393,10 +393,34 @@ fn insert_table(ctx: &mut tera::Context, transactions: &[TransactionView], filte
 
 // ── Page and table ────────────────────────────────────────────────────────────
 
-async fn categories_and_users(db: &DbPool) -> AppResult<(Vec<Category>, Vec<User>)> {
-    let categories = sqlx::query_as::<_, Category>("SELECT * FROM categories ORDER BY name")
+/// Every category, in alphabetical order ignoring accents and case ("Électricité" among
+/// the E's — SQLite's ORDER BY would put it after "Z").
+async fn sorted_categories(db: &DbPool) -> AppResult<Vec<Category>> {
+    let mut categories = sqlx::query_as::<_, Category>("SELECT * FROM categories")
         .fetch_all(db)
         .await?;
+    categories.sort_by_cached_key(|c| sort_key(&c.name));
+    Ok(categories)
+}
+
+/// Lowercase, without the accents of French: "Électricité" → "electricite".
+fn sort_key(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'à' | 'â' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'î' | 'ï' => 'i',
+            'ô' | 'ö' => 'o',
+            'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            c => c,
+        })
+        .collect()
+}
+
+async fn categories_and_users(db: &DbPool) -> AppResult<(Vec<Category>, Vec<User>)> {
+    let categories = sorted_categories(db).await?;
     let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
         .fetch_all(db)
         .await?;
@@ -588,9 +612,7 @@ async fn insert_form_options(ctx: &mut tera::Context, db: &DbPool, user_id: i64,
     let currencies = sqlx::query_as::<_, Currency>("SELECT * FROM currencies ORDER BY name")
         .fetch_all(db)
         .await?;
-    let categories = sqlx::query_as::<_, Category>("SELECT * FROM categories ORDER BY name")
-        .fetch_all(db)
-        .await?;
+    let categories = sorted_categories(db).await?;
     let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
         .fetch_all(db)
         .await?;
@@ -1449,6 +1471,16 @@ pub async fn change_default_currency(state: &AppState, new_currency_id: i64) -> 
 mod tests {
     use super::change_default_currency;
     use crate::test_support::*;
+
+    #[tokio::test]
+    async fn categories_sort_ignoring_accents() {
+        let app = test_app().await;
+        let names: Vec<String> = super::sorted_categories(&app.state.db).await.unwrap().into_iter().map(|c| c.name).collect();
+        let pos = |n: &str| names.iter().position(|x| x == n).unwrap();
+        assert!(pos("Eau") < pos("Électricité") && pos("Électricité") < pos("Gaz"), "{:?}", names);
+        assert!(pos("Téléphone") < pos("Transport"), "{:?}", names);
+        assert_eq!(names.len(), 19);
+    }
 
     /// (amount_cents, currency_id, original_amount_cents, original_currency_id, exchange_rate)
     async fn amounts(db: &crate::db::DbPool) -> Vec<(i64, i64, i64, i64, Option<f64>)> {
