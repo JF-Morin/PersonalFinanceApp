@@ -41,6 +41,10 @@
         </option>
         {% endfor %}
       </select>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        Les soldes et le graphique sont calculés dans cette devise. La changer convertit toutes
+        les transactions au taux de change de leur date (les montants d'origine sont conservés).
+      </p>
     </div>
     <div class="flex gap-3 pt-1">
       <button type="button" @click="theme = saved.theme; currency = saved.currency"

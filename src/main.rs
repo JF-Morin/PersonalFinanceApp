@@ -2,7 +2,7 @@ use axum::{
     routing::{delete, get, post},
     Router,
 };
-use axum::extract::FromRef;
+use axum::extract::{DefaultBodyLimit, FromRef};
 use axum_extra::extract::cookie::Key;
 use std::sync::Arc;
 use tera::Tera;
@@ -14,6 +14,7 @@ use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod backup;
+mod clock;
 mod config;
 mod currency;
 mod db;
@@ -43,6 +44,8 @@ pub struct AppState {
     /// Signs the `user_id` session cookie (derived from COOKIE_SECRET), so a cookie
     /// edited or forged in the browser is rejected as "not logged in".
     pub cookie_key: Key,
+    /// Analyzed PDFs waiting for their import confirmation (`handlers::imports`).
+    pub uploads: Arc<handlers::imports::PendingUploads>,
 }
 
 /// Lets the `SignedCookieJar` extractor find the signing key in the app state.
@@ -124,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
         events: Arc::new(sse::EventBus::new()),
         // Key needs 64 bytes; SHA-512 stretches the (≥ 32-byte) secret to exactly that.
         cookie_key: Key::from(&<sha2::Sha512 as sha2::Digest>::digest(config.cookie_secret.as_bytes())),
+        uploads: Arc::new(handlers::imports::PendingUploads::default()),
     };
 
     // ── Router ─────────────────────────────────────────────────────────────────
@@ -168,7 +172,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/imported-files/:id/reparse", get(handlers::imports::get_reparse_file_modal)
                                              .post(handlers::imports::post_reparse_imported_file))
         .route("/upload",                  get(handlers::imports::get_import_modal))
-        .route("/upload/analyze",          post(handlers::imports::post_analyze))
+        // PDFs up to MAX_UPLOAD_BYTES (plus room for the multipart framing); axum's
+        // default limit is 2 MB.
+        .route("/upload/analyze",          post(handlers::imports::post_analyze)
+                                          .layer(DefaultBodyLimit::max(handlers::imports::MAX_UPLOAD_BYTES + 64 * 1024)))
         .route("/upload/confirm",          post(handlers::imports::post_confirm_import))
         // ── Misc ──────────────────────────────────────────────────────────────
         .route("/404-not-found",           get(handlers::get_not_found))

@@ -1,8 +1,9 @@
 {#
   The editable part of a transaction, shared by the edit modal and the carousel card:
   a read-only summary (modal/_transaction_summary.html), then the only fields a user can change —
-  category, shares and notes. Operation and amount are editable only for a broken line
-  (the parser couldn't read them); the server ignores them otherwise.
+  category, shares and notes. Operation and amount are editable only for a broken line;
+  the server ignores them otherwise. The amount is the original one, in the original
+  currency (converted by the server).
   Expects `t`, `categories` and what modal/_shares_field.html needs.
 #}
 {% include "modal/_transaction_summary.html" %}
@@ -14,8 +15,8 @@
     <input name="operation" type="text" value="{{ t.operation }}" class="input" placeholder="Description de l'opération">
   </div>
   <div>
-    <label class="label">Montant *</label>
-    <input name="amount" type="number" step="0.01" value="{{ t.amount }}" class="input">
+    <label class="label">Montant ({{ t.original_currency_symbol }}) *</label>
+    <input name="amount" type="number" step="0.01" value="{{ t.original_amount }}" class="input">
   </div>
   {% endif %}
   <div>

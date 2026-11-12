@@ -120,6 +120,17 @@
     Required="false"
     Mask="false">24</Config>
 
+  <Config
+    Name="Time zone (TZ)"
+    Target="TZ"
+    Default="America/Toronto"
+    Mode=""
+    Description="Local time zone, used for today's date, the current year and backup file names (e.g. America/Toronto, Europe/Paris)."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">America/Toronto</Config>
+
   <!-- ── Internal paths (rarely need changing) ──────────────────────────── -->
   <Config
     Name="DATABASE_URL"

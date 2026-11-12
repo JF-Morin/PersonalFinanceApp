@@ -1,5 +1,6 @@
 {#
-  Rendered alone by GET /settings/users. Delete buttons only for the admin
+  Rendered alone by GET /settings/users. The edit button only on the logged-in user's
+  own row (nobody edits another profile); delete buttons only for the admin
   (`current_user.is_admin`). Always swapped as a whole — rows are never
   added, removed or replaced one by one. Re-fetches itself on SSE `users` (any user
   was added, edited or deleted), on `users-changed` (this user's own add/edit/delete),
@@ -68,6 +69,7 @@
           </td>
           <td class="table-cell rt-act">
             <div class="flex items-center gap-1 justify-end">
+              {% if u.id == current_user.id %}
               <button
                 hx-get="/settings/users/{{ u.id }}/edit"
                 hx-target="#modal-root"
@@ -80,6 +82,7 @@
                 title="Modifier">
                 <i class="fas fa-pen text-xs"></i>
               </button>
+              {% endif %}
               {% if current_user.is_admin %}
               <button
                 hx-get="/settings/users/{{ u.id }}/delete"

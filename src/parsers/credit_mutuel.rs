@@ -8,6 +8,7 @@ pub struct CreditMutuelParser;
 impl BankParser for CreditMutuelParser {
     fn bank_id(&self) -> i64 { 2 }
     fn bank_name(&self) -> &str { "Crédit Mutuel" }
+    fn currency_code(&self) -> &str { "EUR" }
 
     fn detect(&self, text: &str) -> bool {
         text.contains("CREDIT MUTUEL")

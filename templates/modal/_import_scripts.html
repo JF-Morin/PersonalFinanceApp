@@ -44,6 +44,7 @@ btnDeleteAll.addEventListener('click', deleteAll);
 
 function addFiles(files) {
   Array.from(files).forEach(function(f) {
+    // Only PDFs (the server checks the content too).
     if (!f.name.toLowerCase().endsWith('.pdf')) return;
     var item = { id: nextId++, file: f, status: 'pending', el: null };
     item.el = buildRow(item);
@@ -168,13 +169,8 @@ async function analyzeOne(item) {
   }
 
   setStatus(item, 'importing');
-  var params = new URLSearchParams({
-    transactions_json: data.transactions_json,
-    bank_id:           data.bank_id,
-    filename:          data.filename,
-    source_file:       data.source_file,
-    content_hash:      data.content_hash,
-  });
+  // The server kept the analyzed file: confirming only sends its one-time token.
+  var params = new URLSearchParams({ token: data.token });
   try {
     var importRes  = await fetch('/upload/confirm', {
       method: 'POST',
@@ -205,7 +201,7 @@ async function doReparse(item, fileId) {
         ? data.added + ' transaction(s) ajoutée(s), ' + data.skipped + ' déjà présente(s)'
         : 'Aucune transaction manquante — déjà à jour';
       setStatus(item, 'imported', null);
-      addSummaryEntry({ bank_name: '', transaction_count: data.added, broken_count: 0 }, item.file.name, true);
+      addSummaryEntry({ bank_name: '', transaction_count: data.added }, item.file.name, true);
     } else {
       setStatus(item, 'error', errHtml(data.error || 'Erreur de réanalyse'));
     }
@@ -248,9 +244,7 @@ function addSummaryEntry(data, originalName, isReparse) {
       ? '<span style="color:#16a34a;font-weight:600">' + data.transaction_count + ' transaction(s) récupérée(s)</span>'
       : '<span style="color:#6b7280">Aucune transaction manquante</span>';
   } else {
-    var broken = data.broken_count > 0
-      ? ' <span style="color:#d97706">(' + data.broken_count + ' incomplète(s))</span>' : '';
-    label = '<span style="color:#16a34a;font-weight:600">' + data.transaction_count + ' transaction(s) importée(s)</span>' + broken;
+    label = '<span style="color:#16a34a;font-weight:600">' + data.transaction_count + ' transaction(s) importée(s)</span>';
   }
   var bankLabel = (!isReparse && data.bank_name) ? esc(data.bank_name) + ' — ' : '';
   var entry = document.createElement('div');

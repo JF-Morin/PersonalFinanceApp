@@ -121,13 +121,15 @@ async fn render_login_page(state: &crate::AppState, query: &LoginQuery) -> AppRe
     ctx.insert("theme", &theme);
     ctx.insert("is_dark", &(theme == "dark"));
     let flash = if query.error.as_deref() == Some("nopassword") {
-        Some("Ce profil n'a pas de mot de passe : il doit être défini depuis les Paramètres par un utilisateur connecté.")
+        Some("Ce profil n'a pas de mot de passe et ne peut pas se connecter. Contactez l'administrateur.")
     } else if query.error.is_some() {
         Some("Mot de passe incorrect. Réessayez.")
     } else if query.user_error.as_deref() == Some("empty") {
         Some("Le mot de passe est obligatoire.")
     } else if query.user_error.as_deref() == Some("mismatch") {
         Some("Les mots de passe ne correspondent pas.")
+    } else if query.user_error.as_deref() == Some("noname") {
+        Some("Le prénom est obligatoire.")
     } else if query.user_error.as_deref() == Some("duplicate") {
         Some("Un profil avec ce prénom existe déjà.")
     } else if query.unauthorized.is_some() {

@@ -59,8 +59,8 @@ pub struct Category {
 
 /// Intermediate struct produced by bank parsers, before the transaction is written to the DB.
 /// `parse_note` is non-None when the parser could not fully interpret the line
-/// (amount or operation missing) — these become `status = broken` transactions that
-/// the user must correct manually.
+/// (amount or operation missing) — the whole file is then rejected. `amount` is in the
+/// statement's currency (`BankParser::currency_code`); it becomes cents when stored.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ParsedTransaction {
     /// ISO date string "YYYY-MM-DD" — the posting / value date.
@@ -96,10 +96,21 @@ pub struct TransactionView {
     /// May differ from `date` for bank-value-date vs posting-date.
     pub transaction_date: String,
     pub operation: String,
-    /// Amount in the app's default currency (after conversion if foreign).
+    /// Converted amount in the default currency (`amount_cents`), for display; sums
+    /// and comparisons use `amount_cents`.
     pub amount: f64,
+    pub amount_cents: i64,
     pub currency_symbol: String,
     pub currency_id: i64,
+    /// What really happened: the statement line or what the user typed, in its own currency.
+    pub original_amount: f64,
+    pub original_amount_cents: i64,
+    pub original_currency_id: i64,
+    pub original_currency_symbol: String,
+    /// Original currency → `currency_id` at the transaction date; `None` = no rate found.
+    pub exchange_rate: Option<f64>,
+    /// The original currency isn't the default one (show the original amount too).
+    pub is_foreign: bool,
     pub category_name: Option<String>,
     pub category_id: Option<i64>,
     pub owner_name: String,
@@ -116,10 +127,6 @@ pub struct TransactionView {
     pub is_manual: bool,
     /// Non-None for "broken" transactions — the raw parser note shown in the carousel.
     pub parse_note: Option<String>,
-    /// Original foreign-currency amount before conversion, e.g. 42.00 USD.
-    pub foreign_currency_amount: Option<f64>,
-    pub foreign_currency_id: Option<i64>,
-    pub foreign_currency_symbol: Option<String>,
 }
 
 /// Balance summary for one (user1, user2, currency) triple.

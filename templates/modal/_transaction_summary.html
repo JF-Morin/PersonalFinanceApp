@@ -8,8 +8,8 @@
     <p class="summary-title">{{ t.operation }}</p>
     <div class="text-right flex-shrink-0">
       <span class="summary-amount">{% if t.amount < 0 %}−{% else %}+{% endif %}{{ t.amount | abs | fixed2 }} {{ t.currency_symbol }}</span>
-      {% if t.foreign_currency_amount %}
-      <p class="summary-foreign">{{ t.foreign_currency_amount | abs | fixed2 }} {{ t.foreign_currency_symbol }}</p>
+      {% if t.is_foreign %}
+      <p class="summary-foreign">{{ t.original_amount | abs | fixed2 }} {{ t.original_currency_symbol }}</p>
       {% endif %}
     </div>
   </div>

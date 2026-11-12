@@ -9,6 +9,9 @@ use regex::Regex;
 pub trait BankParser: Send + Sync {
     fn bank_id(&self) -> i64;
     fn bank_name(&self) -> &str;
+    /// ISO 4217 code of the currency the statements are in (e.g. "EUR"). Imported
+    /// amounts are stored in it, then converted to the default currency if it differs.
+    fn currency_code(&self) -> &str;
     fn detect(&self, text: &str) -> bool;
     fn parse(&self, text: &str) -> Result<Vec<ParsedTransaction>>;
     /// Optional: parse directly from positioned text items extracted via lopdf.
@@ -78,8 +81,10 @@ fn validate_balance(
     start_bal: f64,
     end_bal: f64,
 ) -> Result<()> {
-    let transaction_sum: f64 = transactions.iter().map(|t| t.amount).sum();
-    let expected = end_bal - start_bal;
+    // Summed in cents, so many small floats can't drift.
+    use crate::currency::{from_cents, to_cents};
+    let transaction_sum = from_cents(transactions.iter().map(|t| to_cents(t.amount)).sum());
+    let expected = from_cents(to_cents(end_bal) - to_cents(start_bal));
     let error = (transaction_sum - expected).abs();
 
     tracing::info!(
@@ -114,8 +119,29 @@ pub fn all_parsers() -> Vec<Box<dyn BankParser>> {
     ]
 }
 
-/// Auto-detect the bank from PDF text and return (bank_id, bank_name, transactions).
-pub fn detect_and_parse(text: &str) -> Result<(i64, String, Vec<ParsedTransaction>)> {
+/// What a parser read from a statement.
+#[derive(Debug)]
+pub struct ParsedStatement {
+    pub bank_id: i64,
+    pub bank_name: String,
+    /// ISO code of the statement's currency (`BankParser::currency_code`).
+    pub currency_code: String,
+    pub transactions: Vec<ParsedTransaction>,
+}
+
+impl ParsedStatement {
+    fn new(parser: &dyn BankParser, transactions: Vec<ParsedTransaction>) -> Self {
+        ParsedStatement {
+            bank_id: parser.bank_id(),
+            bank_name: parser.bank_name().to_string(),
+            currency_code: parser.currency_code().to_string(),
+            transactions,
+        }
+    }
+}
+
+/// Auto-detect the bank from PDF text and parse the statement.
+pub fn detect_and_parse(text: &str) -> Result<ParsedStatement> {
     for parser in all_parsers() {
         tracing::debug!(parser = %parser.bank_name(), "Trying parser");
         if parser.detect(text) {
@@ -129,7 +155,7 @@ pub fn detect_and_parse(text: &str) -> Result<(i64, String, Vec<ParsedTransactio
             if let Some((start_bal, end_bal)) = parser.extract_balances(text) {
                 validate_balance(parser.bank_name(), &transactions, start_bal, end_bal)?;
             }
-            return Ok((parser.bank_id(), parser.bank_name().to_string(), transactions));
+            return Ok(ParsedStatement::new(parser.as_ref(), transactions));
         }
     }
     tracing::warn!("No parser matched the uploaded document");
@@ -139,7 +165,7 @@ pub fn detect_and_parse(text: &str) -> Result<(i64, String, Vec<ParsedTransactio
 /// Detect and parse using positioned text items (lopdf fallback path).
 pub fn detect_and_parse_positioned(
     items: &[lopdf_text::TextItem],
-) -> Result<(i64, String, Vec<ParsedTransaction>)> {
+) -> Result<ParsedStatement> {
     for parser in all_parsers() {
         let detected = parser
             .detect_positioned(items)
@@ -162,7 +188,7 @@ pub fn detect_and_parse_positioned(
                 if let Some((start_bal, end_bal)) = parser.extract_balances(&text_for_validation) {
                     validate_balance(parser.bank_name(), &transactions, start_bal, end_bal)?;
                 }
-                return Ok((parser.bank_id(), parser.bank_name().to_string(), transactions));
+                return Ok(ParsedStatement::new(parser.as_ref(), transactions));
             }
             // Parser detected but has no positioned implementation — fall back to text
             let text = lopdf_text::items_to_text(items, 5.0);
@@ -170,7 +196,7 @@ pub fn detect_and_parse_positioned(
             if let Some((start_bal, end_bal)) = parser.extract_balances(&text) {
                 validate_balance(parser.bank_name(), &transactions, start_bal, end_bal)?;
             }
-            return Ok((parser.bank_id(), parser.bank_name().to_string(), transactions));
+            return Ok(ParsedStatement::new(parser.as_ref(), transactions));
         }
     }
     anyhow::bail!("Aucun parser disponible pour ce document")

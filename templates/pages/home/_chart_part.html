@@ -2,8 +2,20 @@
   Rendered alone by GET /home/chart-part. Alpine runs init() whenever this canvas is
   added (page load or HTMX swap) and destroy() when it's swapped out, so no page
   script is needed. Labels/totals are json_encode'd, then HTML-escaped by Tera,
-  which keeps them valid inside the double-quoted attribute.
+  which keeps them valid inside the double-quoted attribute. Totals are in the default
+  currency (`currency`).
 #}
+<p class="text-xs text-gray-400 dark:text-gray-500 mb-3 text-center">
+  <i class="fas fa-coins mr-1"></i>Montants en {{ currency.name }} ({{ currency.symbol }})
+</p>
+{% if currency.other_currency_count > 0 %}
+<p class="notice notice-warning mb-3 text-sm">
+  <i class="fas fa-triangle-exclamation"></i>
+  {{ currency.other_currency_count }} transaction(s) complète(s) dans une autre devise ne sont pas comptées.
+  Enregistrez les Préférences (Paramètres) pour les convertir en {{ currency.name }}.
+</p>
+{% endif %}
+
 {% if category_labels %}
 <div class="max-w-md mx-auto">
   <canvas x-data="{
@@ -17,7 +29,13 @@
                     backgroundColor: ['#4f46e5','#7c3aed','#db2777','#ea580c','#ca8a04','#16a34a','#0891b2','#6366f1','#ec4899','#f59e0b']
                   }]
                 },
-                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+                options: {
+                  responsive: true,
+                  plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: { callbacks: { label: (c) => ' ' + c.parsed.toFixed(2) + ' ' + {{ currency.symbol | json_encode() }} } }
+                  }
+                }
               })
             },
             destroy() { Chart.getChart(this.$el)?.destroy() }

@@ -1,3 +1,13 @@
+<p class="text-xs text-gray-400 dark:text-gray-500 mb-3">
+  <i class="fas fa-coins mr-1"></i>Montants en {{ currency.name }} ({{ currency.symbol }}), la devise par défaut.
+</p>
+{% if currency.other_currency_count > 0 %}
+<p class="notice notice-warning mb-3 text-sm">
+  <i class="fas fa-triangle-exclamation"></i>
+  {{ currency.other_currency_count }} transaction(s) complète(s) dans une autre devise ne sont pas comptées.
+  Enregistrez les Préférences (Paramètres) pour les convertir en {{ currency.name }}.
+</p>
+{% endif %}
 {% if pair_balances %}
 <div class="space-y-4">
   {% for pb in pair_balances %}

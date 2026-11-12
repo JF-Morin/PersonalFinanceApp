@@ -12,6 +12,8 @@ services:
       LOG_PATH: /app/logs
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3000
+      # Local time zone (today's date, current year, backup names). Without it: UTC.
+      TZ: ${TZ:-America/Toronto}
       COOKIE_SECRET: ${COOKIE_SECRET:-change-this-in-production-32bytes!!}
       # Override log verbosity if needed: RUST_LOG=personal_finance_app=trace,tower_http=debug
       RUST_LOG: ${RUST_LOG:-personal_finance_app=debug,tower_http=info}

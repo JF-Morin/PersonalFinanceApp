@@ -15,7 +15,36 @@ fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
-/// Compute net balances between every pair of users, per currency.
+/// The default currency (every amount on the home page is in it) and how many complete
+/// transactions are still in another one — rows from before conversions existed; saving
+/// the preferences converts them (`transactions::change_default_currency`).
+#[derive(serde::Serialize)]
+struct HomeCurrency {
+    name: String,
+    symbol: String,
+    /// Complete transactions left out because they aren't in this currency.
+    other_currency_count: i64,
+}
+
+async fn home_currency(db: &DbPool) -> AppResult<(i64, HomeCurrency)> {
+    let id = crate::currency::default_currency_id(db).await;
+    let (name, symbol): (String, String) = sqlx::query_as("SELECT name, symbol FROM currencies WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?
+        .unwrap_or_default();
+    let other_currency_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM transactions t JOIN transaction_status s ON t.status_id = s.id \
+         WHERE s.name = 'complete' AND t.currency_id != ?",
+    )
+    .bind(id)
+    .fetch_one(db)
+    .await?;
+    Ok((id, HomeCurrency { name, symbol, other_currency_count }))
+}
+
+/// Compute net balances between every pair of users, in the default currency
+/// (`currency_id`; transactions in another currency are left out, see `HomeCurrency`).
 ///
 /// Logic overview:
 ///   For each complete transaction owned by user A:
@@ -24,29 +53,33 @@ fn round2(v: f64) -> f64 {
 ///       or is owed by A that share of the income.
 ///   The net for the pair (A, B) is: sum of A's portions for B  −  sum of B's portions for A.
 ///   If the net is positive, A owes B; if negative, B owes A.
-async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
+async fn compute_balances(db: &DbPool, currency_id: i64) -> AppResult<Vec<UserPairBalance>> {
+    // Amounts are converted to the default currency (`amount_cents`, see currency.rs);
+    // summed in cents, shown in currency units.
     // Query 1: all complete transactions — owner pays/receives the full amount.
-    let owner_rows: Vec<(i64, i64, f64)> = sqlx::query_as(
+    let owner_rows: Vec<(i64, i64, i64)> = sqlx::query_as(
         r#"
-        SELECT t.owner_id, t.currency_id, t.amount
+        SELECT t.owner_id, t.currency_id, t.amount_cents
         FROM transactions t
         JOIN transaction_status s ON t.status_id = s.id
-        WHERE s.name = 'complete'
+        WHERE s.name = 'complete' AND t.currency_id = ?
         "#
     )
+    .bind(currency_id)
     .fetch_all(db)
     .await?;
 
     // Query 2: non-owner shares — what each participant owes (or is owed by) the owner.
-    let share_rows: Vec<(i64, i64, i64, f64, f64)> = sqlx::query_as(
+    let share_rows: Vec<(i64, i64, i64, i64, f64)> = sqlx::query_as(
         r#"
-        SELECT t.owner_id, ts.user_id, t.currency_id, t.amount, ts.share
+        SELECT t.owner_id, ts.user_id, t.currency_id, t.amount_cents, ts.share
         FROM transaction_shares ts
         JOIN transactions t ON ts.transaction_id = t.id
         JOIN transaction_status s ON t.status_id = s.id
-        WHERE s.name = 'complete' AND ts.user_id != t.owner_id
+        WHERE s.name = 'complete' AND ts.user_id != t.owner_id AND t.currency_id = ?
         "#
     )
+    .bind(currency_id)
     .fetch_all(db)
     .await?;
 
@@ -67,7 +100,8 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
     let mut total_debit:  HashMap<(i64, i64), f64> = HashMap::new();
     let mut total_credit: HashMap<(i64, i64), f64> = HashMap::new();
 
-    for (owner_id, currency_id, amount) in &owner_rows {
+    for (owner_id, currency_id, cents) in &owner_rows {
+        let amount = &crate::currency::from_cents(*cents);
         if *amount < 0.0 {
             *total_debit.entry((*owner_id, *currency_id)).or_insert(0.0) += amount;
         } else {
@@ -81,7 +115,8 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
     let mut debit_for_other:  HashMap<(i64, i64, i64), f64> = HashMap::new();
     let mut credit_for_other: HashMap<(i64, i64, i64), f64> = HashMap::new();
 
-    for (owner_id, user_id, currency_id, amount, share) in &share_rows {
+    for (owner_id, user_id, currency_id, cents, share) in &share_rows {
+        let amount = &crate::currency::from_cents(*cents);
         let portion = amount * share / 100.0;
         if *amount < 0.0 {
             *debit_for_other.entry((*owner_id, *user_id, *currency_id)).or_insert(0.0) += portion;
@@ -202,21 +237,23 @@ async fn compute_balances(db: &DbPool) -> AppResult<Vec<UserPairBalance>> {
     Ok(result)
 }
 
-/// Compute the top-10 spending categories (by absolute amount) across all complete transactions.
-/// Returns parallel `(labels, totals)` vectors suitable for Chart.js.
-async fn compute_chart_data(db: &DbPool) -> AppResult<(Vec<String>, Vec<f64>)> {
+/// Compute the top-10 spending categories (by absolute amount) across all complete
+/// transactions in the default currency. Only spending (negative amounts) counts: income
+/// and refunds are left out. Returns parallel `(labels, totals)` vectors for Chart.js.
+async fn compute_chart_data(db: &DbPool, currency_id: i64) -> AppResult<(Vec<String>, Vec<f64>)> {
     let by_category: Vec<(Option<String>, Option<f64>)> = sqlx::query_as(
         r#"
-        SELECT COALESCE(c.name, 'Non catégorisé') AS category, SUM(ABS(t.amount)) AS total
+        SELECT COALESCE(c.name, 'Non catégorisé') AS category, SUM(ABS(t.amount_cents)) / 100.0 AS total
         FROM transactions t
         LEFT JOIN categories c ON t.category_id = c.id
         JOIN transaction_status s ON t.status_id = s.id
-        WHERE t.amount != 0 AND s.name = 'complete'
+        WHERE t.amount_cents < 0 AND s.name = 'complete' AND t.currency_id = ?
         GROUP BY c.name
         ORDER BY total DESC
         LIMIT 10
         "#
     )
+    .bind(currency_id)
     .fetch_all(db)
     .await?;
 
@@ -239,9 +276,11 @@ pub async fn get_home(
     let user_id = super::get_user_id(&jar)?;
     let mut ctx = base_context(&jar, &state.db, "/").await?;
 
-    let pair_balances = compute_balances(&state.db).await?;
-    let (category_labels, category_totals) = compute_chart_data(&state.db).await?;
+    let (currency_id, currency) = home_currency(&state.db).await?;
+    let pair_balances = compute_balances(&state.db, currency_id).await?;
+    let (category_labels, category_totals) = compute_chart_data(&state.db, currency_id).await?;
 
+    ctx.insert("currency", &currency);
     insert_stats(&mut ctx, &state.db, user_id).await?;
     ctx.insert("pair_balances", &pair_balances);
     ctx.insert("category_labels", &category_labels);
@@ -257,9 +296,11 @@ pub async fn get_balances_partial(
     jar: SignedCookieJar,
 ) -> AppResult<Html<String>> {
     super::get_user_id(&jar)?;
-    let pair_balances = compute_balances(&state.db).await?;
+    let (currency_id, currency) = home_currency(&state.db).await?;
+    let pair_balances = compute_balances(&state.db, currency_id).await?;
     let mut ctx = tera::Context::new();
     ctx.insert("pair_balances", &pair_balances);
+    ctx.insert("currency", &currency);
     let html = state.tera.render("pages/home/_balances.html", &ctx)?;
     Ok(Html(html))
 }
@@ -307,8 +348,10 @@ pub async fn get_chart_part(
     jar: SignedCookieJar,
 ) -> AppResult<Html<String>> {
     super::get_user_id(&jar)?;
-    let (category_labels, category_totals) = compute_chart_data(&state.db).await?;
+    let (currency_id, currency) = home_currency(&state.db).await?;
+    let (category_labels, category_totals) = compute_chart_data(&state.db, currency_id).await?;
     let mut ctx = tera::Context::new();
+    ctx.insert("currency", &currency);
     ctx.insert("category_labels", &category_labels);
     ctx.insert("category_totals", &category_totals);
     let html = state.tera.render("pages/home/_chart_part.html", &ctx)?;

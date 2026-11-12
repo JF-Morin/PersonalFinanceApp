@@ -1,16 +1,20 @@
 /// Import handlers — PDF upload, analysis, confirmation, deletion, and reparse.
 ///
 /// The import flow is two-step:
-///   1. POST /upload/analyze   — receive the PDF, extract text, run bank parsers, return
-///                               a JSON preview of parsed transactions to the browser.
-///   2. POST /upload/confirm   — browser sends back the JSON plus form fields; we write the
-///                               `imported_files` row and all `transactions` rows to the DB.
+///   1. POST /upload/analyze   — receive the PDF, check it (PDF only, size, name and content
+///                               not already imported), extract text, run the bank parsers.
+///                               Nothing is written: the result is kept in memory
+///                               (`PendingUploads`) and the browser gets a one-time token.
+///   2. POST /upload/confirm   — the browser sends the token back; the PDF is written to
+///                               storage and the `imported_files` / `transactions` rows are
+///                               inserted, all or nothing. Nothing the browser sends is
+///                               trusted besides the token (which only its uploader can use).
 ///
-/// Two-step prevents "phantom" imports when the user cancels the preview modal.
-/// The file is NOT written to storage until the user confirms.
-///
-/// Duplicate detection uses a SHA-256 hash of the PDF bytes; the hash is stored in
-/// `imported_files.content_hash` and checked at both analyze and confirm time.
+/// A file is rejected as a whole — nothing saved on disk or in the DB — when any of its
+/// lines can't be fully parsed (broken), when its balance check fails, when another
+/// imported file has the same name, or when a file with the same content (SHA-256 of the
+/// bytes, `imported_files.content_hash`) was already imported — then the modal offers a
+/// reparse of that file instead.
 ///
 /// For PDFs that use Type3 fonts (which crash pdf_extract), we fall back to lopdf-based
 /// positioned text extraction where column X coordinates distinguish debits from credits.
@@ -23,14 +27,19 @@ use axum::{
 // axum-extra's Query accepts repeated keys (`?bank=1&bank=2`) into a Vec.
 use axum_extra::extract::{cookie::SignedCookieJar, Query};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
 use crate::{
+    clock::UserClock,
+    currency::{self, convert, to_cents, Rates},
     error::{AppError, AppResult},
     models::{Bank, ParsedTransaction, User},
-    parsers::{all_parsers, detect_and_parse, detect_and_parse_positioned, lopdf_text},
+    parsers::{all_parsers, detect_and_parse, detect_and_parse_positioned, lopdf_text, ParsedStatement},
     AppState,
 };
 use super::{
@@ -226,6 +235,7 @@ async fn insert_files_table(
     db: &crate::db::DbPool,
     filter: &FilesFilter,
     current_user_id: i64,
+    clock: &UserClock,
 ) -> AppResult<()> {
     let (all_banks, users) = banks_and_users(db).await?;
     let mut filter = filter.clone();
@@ -252,6 +262,10 @@ async fn insert_files_table(
         "#
     );
     let mut files = sqlx::query_as::<_, ImportedFileView>(&sql).fetch_all(db).await?;
+    // Stored in UTC: shown, and filtered by period, in the user's time.
+    for f in &mut files {
+        f.imported_at = clock.local(&f.imported_at);
+    }
 
     if let Some(s) = filter.search() {
         let s = s.to_lowercase();
@@ -306,20 +320,21 @@ pub async fn get_imported_files(
     State(state): State<AppState>,
     jar: SignedCookieJar,
     headers: HeaderMap,
+    clock: UserClock,
     Query(filter): Query<FilesFilter>,
 ) -> AppResult<Html<String>> {
     let current_user_id = super::get_user_id(&jar)?;
 
     if is_htmx(&headers) && !is_htmx_boost(&headers) {
         let mut ctx = tera::Context::new();
-        insert_files_table(&mut ctx, &state.db, &filter, current_user_id).await?;
+        insert_files_table(&mut ctx, &state.db, &filter, current_user_id, &clock).await?;
         ctx.insert("oob", &true);
         let html = state.tera.render("pages/imports/_table.html", &ctx)?;
         return Ok(Html(html));
     }
 
     let mut ctx = base_context(&jar, &state.db, "/imported-files").await?;
-    insert_files_table(&mut ctx, &state.db, &filter, current_user_id).await?;
+    insert_files_table(&mut ctx, &state.db, &filter, current_user_id, &clock).await?;
     ctx.insert("oob", &false);
     ctx.insert("search", &filter.search().unwrap_or(""));
     let html = state.tera.render("pages/imports/imports.html", &ctx)?;
@@ -331,17 +346,21 @@ pub async fn get_imported_files(
 pub async fn get_file_filters_modal(
     State(state): State<AppState>,
     jar: SignedCookieJar,
+    clock: UserClock,
     Query(mut filter): Query<FilesFilter>,
 ) -> AppResult<Html<String>> {
     super::get_user_id(&jar)?;
     let (banks, users) = banks_and_users(&state.db).await?;
     filter.retain_known(&banks, &users);
-    let years: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT substr(imported_at, 1, 4) AS y FROM imported_files \
-         WHERE filename != 'manual' ORDER BY y DESC",
+    // Years of the import dates in the user's time (stored in UTC).
+    let imported: Vec<String> = sqlx::query_scalar(
+        "SELECT imported_at FROM imported_files WHERE filename != 'manual'",
     )
     .fetch_all(&state.db)
     .await?;
+    let mut years: Vec<String> = imported.iter().map(|t| clock.local(t).chars().take(4).collect()).collect();
+    years.sort_unstable_by(|a, b| b.cmp(a));
+    years.dedup();
     let (sort, _, dir) = filter.sort();
 
     let mut ctx = tera::Context::new();
@@ -433,27 +452,83 @@ pub async fn get_reparse_file_modal(
     render_file_modal(&state, &jar, file_id, "modal/file_reparse.html").await
 }
 
-/// Form submitted by the import confirmation modal.
-#[derive(Deserialize)]
-pub struct ConfirmImportForm {
-    /// The parsed transactions JSON that was returned from the analyze step and echoed back.
-    pub transactions_json: String,
-    pub bank_id: i64,
-    pub filename: String,
-    /// Relative path under STORAGE_PATH where the file was already written.
-    pub source_file: String,
-    /// SHA-256 hex digest of the original PDF bytes (checked again server-side).
-    pub content_hash: String,
+// ── Pending uploads (analyzed, not confirmed yet) ──────────────────────────────
+
+/// Largest PDF accepted by `/upload/analyze` (the route's body limit, see `main.rs`).
+pub const MAX_UPLOAD_BYTES: usize = 20 * 1024 * 1024;
+/// How long an analyzed upload waits for its confirmation.
+const PENDING_TTL: Duration = Duration::from_secs(30 * 60);
+/// At most this many analyzed uploads are kept in memory (the oldest are dropped).
+const PENDING_MAX: usize = 20;
+/// Longest file name accepted.
+const MAX_FILENAME_CHARS: usize = 150;
+/// Parsing a PDF longer than this is abandoned (a malformed or hostile file).
+const PARSE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// A PDF that passed `/upload/analyze`, waiting for `/upload/confirm`. Everything the
+/// confirmation writes comes from here, never from the browser.
+struct PendingUpload {
+    user_id: i64,
+    bank_id: i64,
+    bank_name: String,
+    /// ISO code of the statement's currency (from the parser).
+    currency_code: String,
+    filename: String,
+    content_hash: String,
+    bytes: bytes::Bytes,
+    transactions: Vec<ParsedTransaction>,
+    created: Instant,
 }
 
-/// POST /upload/confirm — persist the analyzed transactions to the DB.
+/// Analyzed uploads by one-time token (in `AppState`; lost on restart, which only means
+/// re-analyzing the file).
+#[derive(Default)]
+pub struct PendingUploads(Mutex<HashMap<String, PendingUpload>>);
+
+impl PendingUploads {
+    fn insert(&self, upload: PendingUpload) -> String {
+        use argon2::password_hash::rand_core::{OsRng, RngCore};
+        let mut raw = [0u8; 32];
+        OsRng.fill_bytes(&mut raw);
+        let token: String = raw.iter().map(|b| format!("{:02x}", b)).collect();
+
+        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        map.retain(|_, u| u.created.elapsed() < PENDING_TTL);
+        while map.len() >= PENDING_MAX {
+            let oldest = map.iter().min_by_key(|(_, u)| u.created).map(|(k, _)| k.clone());
+            match oldest {
+                Some(k) => { map.remove(&k); }
+                None => break,
+            }
+        }
+        map.insert(token.clone(), upload);
+        token
+    }
+
+    /// Take the upload out (a token works once), if it belongs to `user_id` and hasn't expired.
+    fn take(&self, token: &str, user_id: i64) -> Option<PendingUpload> {
+        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        match map.get(token) {
+            Some(u) if u.user_id == user_id && u.created.elapsed() < PENDING_TTL => map.remove(token),
+            _ => None,
+        }
+    }
+}
+
+/// Form submitted by the import modal once the analysis succeeded.
+#[derive(Deserialize)]
+pub struct ConfirmImportForm {
+    /// Returned by `/upload/analyze`.
+    pub token: String,
+}
+
+/// POST /upload/confirm — write the analyzed PDF to storage and its transactions to the DB.
 pub async fn post_confirm_import(
     State(state): State<AppState>,
     jar: SignedCookieJar,
-    headers: HeaderMap,
     Form(form): Form<ConfirmImportForm>,
 ) -> impl IntoResponse {
-    match confirm_import_inner(state, jar, headers, form).await {
+    match confirm_import_inner(state, jar, form).await {
         Ok(resp) => resp,
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.user_message() })).into_response(),
     }
@@ -462,87 +537,54 @@ pub async fn post_confirm_import(
 async fn confirm_import_inner(
     state: AppState,
     jar: SignedCookieJar,
-    _headers: HeaderMap,
     form: ConfirmImportForm,
 ) -> AppResult<axum::response::Response> {
     let user_id = super::get_user_id(&jar)?;
+    let upload = state.uploads.take(&form.token, user_id).ok_or_else(|| {
+        AppError::Other("Analyse expirée ou introuvable : relancez l'analyse du fichier.".into())
+    })?;
 
-    // Server-side bank check (mirrors analyze_inner; prevents direct API bypass).
-    let user_bank: Option<(Option<i64>, Option<String>)> = sqlx::query_as(
-        "SELECT u.bank_id, b.name FROM users u LEFT JOIN banks b ON u.bank_id = b.id WHERE u.id = ?",
-    )
-    .bind(user_id)
-    .fetch_optional(&state.db)
-    .await?;
-
-    if let Some((Some(user_bank_id), ref user_bank_name)) = user_bank {
-        if user_bank_id != form.bank_id {
-            let linked = user_bank_name.as_deref().unwrap_or("votre banque");
-            return Err(AppError::Other(format!(
-                "Importation refusée : ce fichier ne correspond pas à votre banque ({}).",
-                linked
-            )));
-        }
-    }
-
-    // Hard block: same content hash means same PDF, regardless of filename.
-    let already_exists: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM imported_files WHERE content_hash = ? LIMIT 1",
-    )
-    .bind(&form.content_hash)
-    .fetch_optional(&state.db)
-    .await?;
-
-    if already_exists.is_some() {
-        return Err(AppError::Other(
-            "Ce fichier a déjà été importé (contenu identique). Supprimez l'import existant avant de réimporter.".to_string(),
-        ));
-    }
-
-    let transactions: Vec<ParsedTransaction> =
-        serde_json::from_str(&form.transactions_json)
-            .map_err(|e| AppError::Other(format!("Invalid transaction data: {}", e)))?;
-
-    let default_currency_id: i64 = crate::db::get_setting(&state.db, "default_currency_id")
-        .await
-        .unwrap_or_else(|_| "1".to_string())
-        .parse()
-        .unwrap_or(1);
-
-    // One DB transaction: the file row and all its transactions, or nothing.
+    // Amounts are stored in the statement's currency and converted to the default one —
+    // rates fetched before the DB transaction; a missing rate rejects the whole file.
+    let converted = convert_statement(&state, &upload.currency_code, &upload.transactions)
+        .await?
+        .map_err(AppError::Other)?;
+    // One DB transaction: the file row and all its transactions, or nothing. The checks
+    // run again inside it, in case the same file was imported since the analysis.
     let mut tx = state.db.begin().await?;
+    if let Some(msg) = duplicate_error(&mut tx, &upload.filename, &upload.content_hash).await? {
+        return Err(AppError::Other(msg));
+    }
+
+    let relative_path = format!("Statements/{}/{}", upload.bank_name, upload.filename);
     let file_id: i64 = sqlx::query_scalar(
         "INSERT INTO imported_files (filename, bank_id, source_file, row_count, importer_id, content_hash) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
     )
-    .bind(&form.filename)
-    .bind(form.bank_id)
-    .bind(&form.source_file)
-    .bind(transactions.len() as i64)
+    .bind(&upload.filename)
+    .bind(upload.bank_id)
+    .bind(&relative_path)
+    .bind(upload.transactions.len() as i64)
     .bind(user_id)
-    .bind(&form.content_hash)
+    .bind(&upload.content_hash)
     .fetch_one(&mut *tx)
     .await?;
 
-    for transaction in &transactions {
-        // status_id: 1 = pending, 3 = broken (parse_note present).
-        let status_id: i64 = if transaction.parse_note.is_some() { 3 } else { 1 };
-        sqlx::query(
-            "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, owner_id, status_id, from_file_id, parse_note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&transaction.date)
-        .bind(&transaction.transaction_date)
-        .bind(&transaction.operation)
-        .bind(transaction.amount)
-        .bind(default_currency_id)
-        .bind(user_id)
-        .bind(status_id)
-        .bind(file_id)
-        .bind(&transaction.parse_note)
-        .execute(&mut *tx)
-        .await?;
+    for (transaction, amounts) in upload.transactions.iter().zip(&converted.amounts) {
+        // status_id 1 = pending (broken lines never get here: the analysis rejects the file).
+        insert_imported_transaction(&mut tx, transaction, amounts, &converted, user_id, file_id).await?;
     }
-    tx.commit().await?;
+
+    // Write the PDF before committing, and remove it if the commit fails: either both the
+    // file and the rows are saved, or neither. No imported file uses this name (checked
+    // above), so a file already there is a leftover nothing points to.
+    let statements_dir = PathBuf::from(&state.config.storage_path).join("Statements").join(&upload.bank_name);
+    tokio::fs::create_dir_all(&statements_dir).await?;
+    let dest_path = statements_dir.join(&upload.filename);
+    tokio::fs::write(&dest_path, &upload.bytes).await?;
+    if let Err(e) = tx.commit().await {
+        let _ = tokio::fs::remove_file(&dest_path).await;
+        return Err(e.into());
+    }
 
     // Notify imports listeners (imports page) and transactions listeners (transactions page,
     // home page) — this operation writes rows to both tables.
@@ -550,24 +592,151 @@ async fn confirm_import_inner(
     state.events.send(crate::sse::AppEvent { kind: "transactions", actor_id: user_id });
     tracing::info!(
         file_id      = %file_id,
-        filename     = %form.filename,
-        bank_id      = %form.bank_id,
-        transactions = %transactions.len(),
+        filename     = %upload.filename,
+        bank_id      = %upload.bank_id,
+        transactions = %upload.transactions.len(),
         user_id      = %user_id,
         "Import confirmed and saved"
     );
 
-    Ok(Json(serde_json::json!({ "ok": true, "file_id": file_id, "transaction_count": transactions.len() }))
+    Ok(Json(serde_json::json!({ "ok": true, "file_id": file_id, "transaction_count": upload.transactions.len() }))
         .into_response())
+}
+
+/// A statement's amounts in cents, original and converted to the default currency.
+struct ConvertedStatement {
+    original_currency_id: i64,
+    default_currency_id: i64,
+    /// Per transaction, in order: (original cents, rate, converted cents).
+    amounts: Vec<(i64, f64, i64)>,
+}
+
+/// Convert a statement's amounts to the default currency (rate of each line's date; one
+/// request for the whole statement when its currency isn't the default). `Err` is the
+/// user-facing reason the file is refused: unknown currency or missing rate.
+async fn convert_statement(
+    state: &AppState,
+    currency_code: &str,
+    transactions: &[ParsedTransaction],
+) -> AppResult<Result<ConvertedStatement, String>> {
+    let Some(original_currency_id) = currency::currency_id_by_code(&state.db, currency_code).await? else {
+        return Ok(Err(format!("Devise du relevé inconnue de l'application ({}) : importation refusée.", currency_code)));
+    };
+    let default_currency_id = currency::default_currency_id(&state.db).await;
+    let needs: Vec<(i64, String)> = transactions.iter().map(|t| (original_currency_id, t.date.clone())).collect();
+    let rates = match Rates::fetch(&state.db, default_currency_id, &needs).await {
+        Ok(rates) => rates,
+        Err(e) => {
+            tracing::warn!(err = %e, "Import refused: exchange rates unavailable");
+            return Ok(Err(format!("Taux de change introuvables ({}) : importation refusée, réessayez plus tard.", e)));
+        }
+    };
+    let mut amounts = Vec::with_capacity(transactions.len());
+    for t in transactions {
+        let Some(rate) = rates.rate(original_currency_id, &t.date) else {
+            return Ok(Err(format!("Taux de change du {} introuvable : importation refusée.", t.date)));
+        };
+        let original = to_cents(t.amount);
+        amounts.push((original, rate, convert(original, rate)));
+    }
+    Ok(Ok(ConvertedStatement { original_currency_id, default_currency_id, amounts }))
+}
+
+/// Insert one imported line (status pending) on the caller's DB transaction.
+async fn insert_imported_transaction(
+    conn: &mut sqlx::SqliteConnection,
+    transaction: &ParsedTransaction,
+    &(original_cents, rate, amount_cents): &(i64, f64, i64),
+    converted: &ConvertedStatement,
+    user_id: i64,
+    file_id: i64,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO transactions (date, transaction_date, operation, original_amount_cents, \
+         original_currency_id, exchange_rate, amount_cents, currency_id, owner_id, status_id, from_file_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+    )
+    .bind(&transaction.date)
+    .bind(&transaction.transaction_date)
+    .bind(&transaction.operation)
+    .bind(original_cents)
+    .bind(converted.original_currency_id)
+    .bind(rate)
+    .bind(amount_cents)
+    .bind(converted.default_currency_id)
+    .bind(user_id)
+    .bind(file_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Why an upload can't be imported because of an existing file: same name (any case —
+/// the storage share may not tell them apart) or same content. `None` = no conflict.
+async fn duplicate_error(
+    conn: &mut sqlx::SqliteConnection,
+    filename: &str,
+    content_hash: &str,
+) -> AppResult<Option<String>> {
+    let same_content: Option<String> = sqlx::query_scalar(
+        "SELECT filename FROM imported_files WHERE content_hash = ? LIMIT 1",
+    )
+    .bind(content_hash)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(existing) = same_content {
+        return Ok(Some(format!("Ce relevé a déjà été importé (contenu identique à « {} »).", existing)));
+    }
+    let same_name: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM imported_files WHERE filename != 'manual' AND LOWER(filename) = LOWER(?))",
+    )
+    .bind(filename)
+    .fetch_one(&mut *conn)
+    .await?;
+    if same_name {
+        return Ok(Some(format!(
+            "Un fichier nommé « {} » a déjà été importé. Les fichiers ne sont jamais renommés : \
+             vérifiez qu'il ne s'agit pas du même relevé, puis renommez-le avant de l'importer.",
+            filename
+        )));
+    }
+    Ok(None)
+}
+
+/// Check that an upload is a PDF with an acceptable name; returns the name it is stored
+/// under (characters other than letters, digits, `.`, `-`, `_` become `_`).
+fn check_pdf_upload(original_name: &str, bytes: &[u8]) -> Result<String, String> {
+    // Only the last path component: some browsers send a full path.
+    let base = original_name.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let name = sanitize_filename(base);
+    if !name.to_lowercase().ends_with(".pdf") || name.len() <= 4 || name.starts_with('.') {
+        return Err("Seuls les fichiers PDF (.pdf) peuvent être importés.".into());
+    }
+    if name.chars().count() > MAX_FILENAME_CHARS {
+        return Err(format!("Nom de fichier trop long (maximum {} caractères).", MAX_FILENAME_CHARS));
+    }
+    if bytes.is_empty() {
+        return Err("Le fichier est vide.".into());
+    }
+    // The real type is in the content, not the name: a PDF starts with `%PDF-` (the spec
+    // allows a few bytes before it) and ends with `%%EOF` (possibly followed by whitespace).
+    let head = &bytes[..bytes.len().min(1024)];
+    let tail = &bytes[bytes.len().saturating_sub(1024)..];
+    let contains = |hay: &[u8], needle: &[u8]| hay.windows(needle.len()).any(|w| w == needle);
+    if !contains(head, b"%PDF-") || !contains(tail, b"%%EOF") {
+        return Err("Ce fichier n'est pas un PDF valide.".into());
+    }
+    Ok(name)
 }
 
 /// POST /upload/analyze — receive a PDF, parse it, return a JSON preview (no DB writes).
 pub async fn post_analyze(
     State(state): State<AppState>,
     jar: SignedCookieJar,
+    clock: UserClock,
     multipart: Multipart,
 ) -> impl IntoResponse {
-    match analyze_inner(state, jar, multipart).await {
+    match analyze_inner(state, jar, clock, multipart).await {
         Ok(resp) => resp,
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.user_message() })).into_response(),
     }
@@ -576,27 +745,74 @@ pub async fn post_analyze(
 async fn analyze_inner(
     state: AppState,
     jar: SignedCookieJar,
+    clock: UserClock,
     mut multipart: Multipart,
 ) -> AppResult<axum::response::Response> {
     let user_id = super::get_user_id(&jar)?;
 
-    let mut file_bytes: Option<bytes::Bytes> = None;
-    let mut original_name = String::from("upload.pdf");
-
-    // Read the multipart stream until we find the "file" field.
-    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::Other(e.to_string()))? {
-        if field.name() == Some("file") {
-            original_name = field.file_name().unwrap_or("upload.pdf").to_string();
-            file_bytes = Some(field.bytes().await.map_err(|e| AppError::Other(e.to_string()))?);
+    // Exactly one "file" field; anything else in the form is ignored.
+    // A body over the route's limit fails while it is read.
+    let read_error = |e: axum::extract::multipart::MultipartError| {
+        tracing::warn!(error = %e, "Upload refused: unreadable multipart body");
+        AppError::Other(format!(
+            "Envoi du fichier impossible (taille maximale : {} Mo).",
+            MAX_UPLOAD_BYTES / (1024 * 1024)
+        ))
+    };
+    let mut upload: Option<(String, bytes::Bytes)> = None;
+    while let Some(field) = multipart.next_field().await.map_err(read_error)? {
+        if field.name() != Some("file") {
+            continue;
         }
+        if upload.is_some() {
+            return Err(AppError::Other("Un seul fichier par analyse.".into()));
+        }
+        let name = field.file_name().unwrap_or("").to_string();
+        let data = field.bytes().await.map_err(read_error)?;
+        upload = Some((name, data));
     }
-
-    let bytes = file_bytes.ok_or_else(|| AppError::Other("No file provided".into()))?;
+    let (original_name, bytes) = upload.ok_or_else(|| AppError::Other("Aucun fichier reçu.".into()))?;
 
     tracing::info!(filename = %original_name, bytes = %bytes.len(), "Analyze request received");
 
-    let (bank_id, bank_name, transactions) =
-        safe_detect_and_parse(bytes.clone(), &original_name).await?;
+    let filename = check_pdf_upload(&original_name, &bytes).map_err(|msg| {
+        tracing::warn!(filename = %original_name, reason = %msg, "Upload refused");
+        AppError::Other(msg)
+    })?;
+
+    // Same content already imported → offer a reparse of that file. Checked before parsing.
+    let content_hash = format!("{:x}", Sha256::digest(&bytes));
+    let existing_import: Option<(i64, String)> = sqlx::query_as(
+        "SELECT id, imported_at FROM imported_files WHERE content_hash = ? LIMIT 1",
+    )
+    .bind(&content_hash)
+    .fetch_optional(&state.db)
+    .await?;
+    if let Some((existing_file_id, imported_at)) = existing_import {
+        tracing::info!(
+            filename         = %filename,
+            imported_at      = %imported_at,
+            existing_file_id = %existing_file_id,
+            "Duplicate content hash — offering reparse"
+        );
+        return Ok(Json(serde_json::json!({
+            "ok": false,
+            "duplicate": true,
+            "existing_file_id": existing_file_id,
+            "imported_at": clock.local(&imported_at),
+        })).into_response());
+    }
+    // Same name, different content → refused (files are never renamed).
+    {
+        let mut conn = state.db.acquire().await?;
+        if let Some(msg) = duplicate_error(&mut conn, &filename, &content_hash).await? {
+            tracing::info!(filename = %filename, "Upload refused: name already imported");
+            return Err(AppError::Other(msg));
+        }
+    }
+
+    let ParsedStatement { bank_id, bank_name, currency_code, transactions } =
+        safe_detect_and_parse(bytes.clone(), &filename).await?;
 
     // Bank check: if the user has a bank linked, the PDF must come from that same bank.
     let user_bank: Option<(Option<i64>, Option<String>)> = sqlx::query_as(
@@ -615,101 +831,93 @@ async fn analyze_inner(
                 user_bank   = %linked,
                 "Rejected PDF: bank mismatch"
             );
-            return Ok(Json(serde_json::json!({
-                "ok": false,
-                "error": format!(
-                    "Ce fichier provient de {} mais votre compte est associé à {}. Vous ne pouvez importer que vos propres relevés de banque.",
-                    bank_name, linked
-                )
-            })).into_response());
+            return Err(AppError::Other(format!(
+                "Ce fichier provient de {} mais votre compte est associé à {}. Vous ne pouvez importer que vos propres relevés de banque.",
+                bank_name, linked
+            )));
         }
     }
 
-    // Compute hash and check for duplicates BEFORE writing to storage.
-    let content_hash = format!("{:x}", Sha256::digest(&bytes));
-
-    let existing_import: Option<(i64, String)> = sqlx::query_as(
-        "SELECT id, imported_at FROM imported_files WHERE content_hash = ? LIMIT 1",
-    )
-    .bind(&content_hash)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
-
-    if let Some((existing_file_id, imported_at)) = existing_import {
-        tracing::info!(
-            filename         = %original_name,
-            imported_at      = %imported_at,
-            existing_file_id = %existing_file_id,
-            "Duplicate content hash — offering reparse"
-        );
-        return Ok(Json(serde_json::json!({
-            "ok": false,
-            "duplicate": true,
-            "existing_file_id": existing_file_id,
-            "imported_at": imported_at,
-        })).into_response());
-    }
-
-    // Save file to storage only after successful parse, bank check, and duplicate check.
-    let storage_root = PathBuf::from(&state.config.storage_path);
-    let statements_dir = storage_root.join("Statements").join(&bank_name);
-    tokio::fs::create_dir_all(&statements_dir).await?;
-
-    let safe_name = sanitize_filename(&original_name);
-    let dest_path = statements_dir.join(&safe_name);
-    tokio::fs::write(&dest_path, &bytes).await?;
-
-    let relative_path = format!("Statements/{}/{}", bank_name, safe_name);
-
-    let broken_count = transactions.iter().filter(|t| t.parse_note.is_some()).count();
     let transaction_count = transactions.len();
-
-    let transactions_json = serde_json::to_string(&transactions)
-        .map_err(|e| AppError::Other(e.to_string()))?;
-
     tracing::info!(
-        filename   = %safe_name,
-        bank       = %bank_name,
-        transaction_count   = %transaction_count,
-        broken     = %broken_count,
+        filename          = %filename,
+        bank              = %bank_name,
+        transaction_count = %transaction_count,
         "Analysis complete"
     );
 
+    // Nothing is written yet: `/upload/confirm` saves it with this token.
+    let token = state.uploads.insert(PendingUpload {
+        user_id,
+        bank_id,
+        bank_name: bank_name.clone(),
+        currency_code,
+        filename: filename.clone(),
+        content_hash,
+        bytes,
+        transactions,
+        created: Instant::now(),
+    });
+
     Ok(Json(serde_json::json!({
         "ok": true,
-        "bank_id": bank_id,
+        "token": token,
         "bank_name": bank_name,
         "transaction_count": transaction_count,
-        "broken_count": broken_count,
-        "transactions_json": transactions_json,
-        "filename": safe_name,
-        "source_file": relative_path,
-        "content_hash": content_hash,
+        "filename": filename,
     })).into_response())
 }
 
-/// Extract text from a PDF and run bank detection + parsing.
+/// Extract text from a PDF, run bank detection + parsing, and reject the file when any
+/// line couldn't be fully parsed (a broken line rejects the whole file).
 ///
-/// Tries pdf_extract first. If that panics (e.g. Type3 fonts, lopdf 0.34 issue),
-/// falls back to lopdf-based positioned text extraction and the positioned parser path.
-/// `catch_unwind` is used to convert a panic into a Result so the server keeps running.
+/// Runs on a blocking thread (CPU-bound), with `catch_unwind` so a PDF that makes a
+/// library panic only fails this request, and a time limit for malformed files.
 async fn safe_detect_and_parse(
     bytes: bytes::Bytes,
     filename: &str,
-) -> AppResult<(i64, String, Vec<ParsedTransaction>)> {
-    let bytes_clone = bytes.clone();
+) -> AppResult<ParsedStatement> {
+    let name = filename.to_string();
+    let task = tokio::task::spawn_blocking(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| detect_and_parse_blocking(&bytes, &name)))
+    });
+    let statement = match tokio::time::timeout(PARSE_TIMEOUT, task).await {
+        Err(_) => {
+            tracing::warn!(filename = %filename, "PDF parsing timed out");
+            return Err(AppError::Other("L'analyse du PDF a pris trop de temps : fichier refusé.".into()));
+        }
+        Ok(Err(e)) => return Err(AppError::Other(format!("spawn_blocking join error: {}", e))),
+        Ok(Ok(Err(_panic))) => {
+            tracing::warn!(filename = %filename, "PDF parsing panicked");
+            return Err(AppError::Other("Ce PDF n'a pas pu être lu : fichier refusé.".into()));
+        }
+        Ok(Ok(Ok(result))) => result?,
+    };
 
-    // Run pdf_extract in a blocking thread (it's CPU-bound) and catch any panics.
-    let text_result = tokio::task::spawn_blocking(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            pdf_extract::extract_text_from_mem(&bytes_clone)
-        }))
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("spawn_blocking join error: {}", e)))?;
+    let broken: Vec<&ParsedTransaction> = statement.transactions.iter().filter(|t| t.parse_note.is_some()).collect();
+    if !broken.is_empty() {
+        tracing::warn!(filename = %filename, broken = %broken.len(), "File rejected: broken lines");
+        let mut lines: Vec<String> = broken
+            .iter()
+            .take(5)
+            .map(|t| format!("• {} — {} ({})", t.date, t.operation, t.parse_note.as_deref().unwrap_or("")))
+            .collect();
+        if broken.len() > 5 {
+            lines.push(format!("• … et {} autre(s)", broken.len() - 5));
+        }
+        return Err(AppError::Other(format!(
+            "{} ligne(s) n'ont pas pu être lues entièrement : le fichier est refusé.\n{}",
+            broken.len(),
+            lines.join("\n")
+        )));
+    }
+    Ok(statement)
+}
 
+/// The parsing pipeline itself (blocking). Tries pdf_extract first; if it fails or panics
+/// (e.g. Type3 fonts), or the matched parser prefers it, uses lopdf positioned text.
+fn detect_and_parse_blocking(bytes: &[u8], filename: &str) -> AppResult<ParsedStatement> {
+    let text_result = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(bytes));
     match text_result {
         Ok(Ok(text)) => {
             // If the matched parser prefers positioned extraction (e.g. BNP Paribas), use
@@ -721,7 +929,7 @@ async fn safe_detect_and_parse(
 
             if prefers_positioned {
                 tracing::info!(filename = %filename, "Parser prefers positioned — using lopdf path");
-                match lopdf_fallback(&bytes, filename) {
+                match lopdf_fallback(bytes, filename) {
                     Ok(result) => return Ok(result),
                     Err(e) => {
                         tracing::warn!(
@@ -746,12 +954,12 @@ async fn safe_detect_and_parse(
                 error    = %pdf_err,
                 "pdf_extract error, trying lopdf fallback"
             );
-            lopdf_fallback(&bytes, filename)
+            lopdf_fallback(bytes, filename)
         }
         Err(_panic_payload) => {
             // pdf_extract panicked — try lopdf.
             tracing::warn!(filename = %filename, "pdf_extract panicked, trying lopdf fallback");
-            lopdf_fallback(&bytes, filename)
+            lopdf_fallback(bytes, filename)
         }
     }
 }
@@ -759,9 +967,9 @@ async fn safe_detect_and_parse(
 /// lopdf-based extraction path: returns positioned text items (char, x, y per page)
 /// so parsers can determine debit/credit by X column position.
 fn lopdf_fallback(
-    bytes: &bytes::Bytes,
+    bytes: &[u8],
     filename: &str,
-) -> AppResult<(i64, String, Vec<ParsedTransaction>)> {
+) -> AppResult<ParsedStatement> {
     let items = lopdf_text::extract_positioned(bytes)
         .map_err(|e| AppError::Other(format!("lopdf extraction failed: {}", e)))?;
 
@@ -833,7 +1041,10 @@ async fn delete_file_inner(
     tx.commit().await?;
 
     // Only once the DB is committed: delete the physical file (best-effort — don't fail if missing)
-    let physical_path = PathBuf::from(&state.config.storage_path).join(&source_file);
+    let Some(physical_path) = stored_file_path(&state, &source_file) else {
+        tracing::warn!(source_file = %source_file, "Stored path outside storage — PDF not deleted");
+        return Ok(file_deleted_response(htmx, transactions_deleted));
+    };
     match tokio::fs::remove_file(&physical_path).await {
         Ok(_) => tracing::info!(path = %physical_path.display(), "Physical PDF deleted"),
         Err(e) => tracing::warn!(
@@ -855,23 +1066,37 @@ async fn delete_file_inner(
         "Import file deleted"
     );
 
+    Ok(file_deleted_response(htmx, transactions_deleted))
+}
+
+fn file_deleted_response(htmx: bool, transactions_deleted: u64) -> axum::response::Response {
     if htmx {
         let msg = format!("Fichier supprimé — {} transaction(s) supprimée(s).", transactions_deleted);
-        Ok(toast_response(&msg, true, &["files-changed"]))
+        toast_response(&msg, true, &["files-changed"])
     } else {
-        Ok(Json(serde_json::json!({
+        Json(serde_json::json!({
             "ok": true,
             "transactions_deleted": transactions_deleted,
         }))
-        .into_response())
+        .into_response()
     }
+}
+
+/// `STORAGE_PATH/<source_file>`, or `None` when `source_file` could point outside the
+/// storage folder (`..`, an absolute path) — never read or delete such a path.
+fn stored_file_path(state: &AppState, source_file: &str) -> Option<PathBuf> {
+    use std::path::Component;
+    let relative = std::path::Path::new(source_file);
+    let safe = !source_file.is_empty() && relative.components().all(|c| matches!(c, Component::Normal(_)));
+    safe.then(|| PathBuf::from(&state.config.storage_path).join(relative))
 }
 
 // ── Reparse imported file ─────────────────────────────────────────────────────
 
 /// POST /imported-files/:id/reparse — re-run the parser and add any transactions that
 /// weren't present in the original import (e.g., because the parser was improved later).
-/// Existing transactions are compared by (date, operation, amount) to avoid duplicates.
+/// Existing transactions are matched by (date, operation, amount), one for one: a line that
+/// appears twice in the PDF but once in the DB is added once.
 pub async fn post_reparse_imported_file(
     State(state): State<AppState>,
     jar: SignedCookieJar,
@@ -912,65 +1137,59 @@ async fn reparse_inner(
     }
 
     // Load the stored PDF from disk and re-run the full parse pipeline.
-    let full_path = PathBuf::from(&state.config.storage_path).join(&source_file);
+    let full_path = stored_file_path(state, &source_file)
+        .ok_or_else(|| AppError::Other("Chemin du fichier en stockage invalide.".into()))?;
     let file_data = tokio::fs::read(&full_path).await.map_err(|e| {
         AppError::Other(format!("Impossible de lire le fichier en stockage : {}", e))
     })?;
     let bytes = bytes::Bytes::from(file_data);
 
-    let (_, _, new_transactions) = safe_detect_and_parse(bytes, &filename).await.map_err(|e| {
-        AppError::Other(format!("Erreur de parsing : {}", e))
+    // A file with broken lines is rejected as a whole here too: nothing is added.
+    let statement = safe_detect_and_parse(bytes, &filename).await.map_err(|e| {
+        AppError::Other(format!("Erreur de parsing : {}", e.user_message()))
     })?;
+    let total = statement.transactions.len();
 
-    // Fetch existing transactions for deduplication (date + operation + amount).
-    let existing: Vec<(String, String, f64)> = sqlx::query_as(
-        "SELECT date, operation, amount FROM transactions WHERE from_file_id = ?",
+    // The file's transactions still in the DB, counted by (date, operation, original
+    // amount in cents): a statement can have the same line twice (two identical coffees
+    // the same day).
+    let existing: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT date, operation, original_amount_cents FROM transactions WHERE from_file_id = ?",
     )
     .bind(file_id)
     .fetch_all(&state.db)
     .await?;
+    let mut remaining: HashMap<(String, String, i64), usize> = HashMap::new();
+    for key in existing {
+        *remaining.entry(key).or_insert(0) += 1;
+    }
+    // Each parsed line uses up one matching stored transaction; once none is left, the
+    // line is missing (e.g. one of two identical lines was deleted) and is added again.
+    let missing: Vec<ParsedTransaction> = statement
+        .transactions
+        .into_iter()
+        .filter(|t| {
+            let key = (t.date.clone(), t.operation.clone(), to_cents(t.amount));
+            match remaining.get_mut(&key).filter(|c| **c > 0) {
+                Some(count) => { *count -= 1; false }
+                None => true,
+            }
+        })
+        .collect();
+    let added = missing.len() as i64;
+    let skipped = (total - missing.len()) as i64;
 
-    let default_currency_id: i64 = crate::db::get_setting(&state.db, "default_currency_id")
-        .await
-        .unwrap_or_else(|_| "1".to_string())
-        .parse()
-        .unwrap_or(1);
-
-    let mut added: i64 = 0;
-    let mut skipped: i64 = 0;
+    // Converted like an import (rates fetched before the DB transaction; a missing rate
+    // adds nothing).
+    let converted = convert_statement(state, &statement.currency_code, &missing)
+        .await?
+        .map_err(AppError::Other)?;
 
     // One DB transaction: either every missing transaction is added, or none.
     let mut tx = state.db.begin().await?;
-    for transaction in &new_transactions {
-        // Skip if a transaction with the same date, operation, and amount already exists.
-        // 0.005 tolerance on amount to handle minor floating-point differences.
-        let already_exists = existing.iter().any(|(d, op, amt)| {
-            d == &transaction.date && op == &transaction.operation && (amt - transaction.amount).abs() < 0.005
-        });
-
-        if already_exists {
-            skipped += 1;
-            continue;
-        }
-
-        let status_id: i64 = if transaction.parse_note.is_some() { 3 } else { 1 };
-        sqlx::query(
-            "INSERT INTO transactions (date, transaction_date, operation, amount, currency_id, \
-             owner_id, status_id, from_file_id, parse_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&transaction.date)
-        .bind(&transaction.transaction_date)
-        .bind(&transaction.operation)
-        .bind(transaction.amount)
-        .bind(default_currency_id)
-        .bind(user_id)
-        .bind(status_id)
-        .bind(file_id)
-        .bind(&transaction.parse_note)
-        .execute(&mut *tx)
-        .await?;
-
-        added += 1;
+    for (transaction, amounts) in missing.iter().zip(&converted.amounts) {
+        // status_id 1 = pending (a file with broken lines is rejected by the parse above).
+        insert_imported_transaction(&mut tx, transaction, amounts, &converted, user_id, file_id).await?;
     }
     tx.commit().await?;
 
@@ -999,7 +1218,7 @@ async fn reparse_inner(
             "ok":      true,
             "added":   added,
             "skipped": skipped,
-            "total":   new_transactions.len(),
+            "total":   total,
         }))
         .into_response())
     }
@@ -1010,4 +1229,31 @@ fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_pdf_upload;
+
+    const PDF: &[u8] = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n";
+
+    #[test]
+    fn accepts_a_pdf_and_keeps_its_name() {
+        assert_eq!(check_pdf_upload("Relevé_2026-01.PDF", PDF).unwrap(), "Relevé_2026-01.PDF");
+        // Only the last path component is kept; unsafe characters become `_`.
+        assert_eq!(check_pdf_upload("C:\\Users\\me\\releve mars.pdf", PDF).unwrap(), "releve_mars.pdf");
+        assert_eq!(check_pdf_upload("../../data/x.pdf", PDF).unwrap(), "x.pdf");
+    }
+
+    #[test]
+    fn rejects_other_files() {
+        assert!(check_pdf_upload("notes.txt", PDF).is_err());
+        assert!(check_pdf_upload(".pdf", PDF).is_err());
+        assert!(check_pdf_upload("..pdf", PDF).is_err());
+        assert!(check_pdf_upload("empty.pdf", b"").is_err());
+        // Right name, wrong content.
+        assert!(check_pdf_upload("fake.pdf", b"<html><script>alert(1)</script></html>").is_err());
+        assert!(check_pdf_upload("truncated.pdf", b"%PDF-1.7\n1 0 obj").is_err());
+        assert!(check_pdf_upload(&format!("{}.pdf", "a".repeat(200)), PDF).is_err());
+    }
 }

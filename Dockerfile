@@ -18,7 +18,8 @@ RUN touch src/main.rs && cargo build --release
 ## Stage 2 — Runtime
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# tzdata: lets TZ set the local time used for today's date, the current year and backup names.
+RUN apt-get update && apt-get install -y ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -38,6 +39,7 @@ ENV STORAGE_PATH=/app/storage
 ENV LOG_PATH=/app/logs
 ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=3000
+ENV TZ=America/Toronto
 ENV RUST_LOG=personal_finance_app=debug,tower_http=info
 
 ENTRYPOINT ["./docker-entrypoint.sh"]

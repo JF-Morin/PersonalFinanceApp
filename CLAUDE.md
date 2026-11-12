@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `regex` | 1 | Regular expressions — used in every bank parser to match and capture transaction line fields |
 | `sha2` | 0.10 | SHA-256 of uploaded PDFs, stored in `imported_files.content_hash` for duplicate detection |
 | `argon2` | 0.5 | Argon2id password hashing for user passwords |
-| `reqwest` | 0.12 | HTTP client for exchange rates (`currency.rs`, Frankfurter API) when a transaction is entered in a foreign currency |
+| `reqwest` | 0.12 | HTTP client for exchange rates (`currency.rs`, Frankfurter API — ECB rates) when an amount isn't in the default currency |
 | `anyhow` | 1 | Ergonomic error type for functions that can fail in multiple ways (parser internals, startup) |
 | `thiserror` | 1 | Derives `std::error::Error` for the `AppError` enum without boilerplate |
 | `dotenvy` | 0.15 | Loads `.env` into environment variables at startup before `Config::from_env()` runs |
@@ -78,21 +78,22 @@ Unknown routes redirect to `/404-not-found` (`templates/errors/404.html`).
 ### Auth
 A user picks their profile at `/login` and enters their password (Argon2id hash in `users.password_hash`). Users without a password set one on first login. The user ID is then stored in a `user_id` cookie (HTTP-only, SameSite=Lax) **signed** with a key derived from `COOKIE_SECRET` (`SignedCookieJar`; the app refuses to start if the secret is shorter than 32 bytes and warns if it is still the example value). A forged or edited cookie fails the signature check. All handlers call `handlers::get_user_id(&jar)`, which returns `Err(AppError::Unauthorized)` → redirect to `/login`.
 
-Permissions: new users can be created without being logged in only on first run (no user yet); afterwards only by a logged-in user (settings page). A password (with confirmation) is required for every new user; a profile without one (legacy) can't log in until its password is set from the settings page — except when nobody has a password yet, where the first login sets it. The first user is the **admin** (`users.is_admin`, migration 006): only the admin can delete users, including themselves; when no admin exists (the admin deleted their account), the next user created becomes admin. Transactions can be edited/deleted only by their owner; imported files can be reparsed/deleted only by their importer.
+Permissions: new users can be created without being logged in only on first run (no user yet); afterwards only by a logged-in user (settings page). A password (with confirmation) is required for every new user; a profile without one (legacy) can't log in — except when nobody has a password yet, where the first login sets it. Each user can edit only their own profile (name — required, unique —, bank, password). The first user is the **admin** (`users.is_admin`, migration 006): only the admin can delete users, including themselves; when no admin exists (the admin deleted their account), the next user created becomes admin. Transactions can be edited/deleted only by their owner; imported files can be reparsed/deleted only by their importer.
 
 ### Live updates (SSE)
 Handlers that change data call `state.events.send(AppEvent { kind, actor_id })` with `kind` = `"transactions"`, `"imports"`, `"settings"` (app preferences) or `"users"` (a user was added, edited or deleted). Every logged-in page holds an open `GET /events` connection (`hx-ext="sse"` in `layout/base.html`), and elements with `hx-trigger="sse:<kind>"` re-fetch their partial (home cards, transaction table, pending badge).
 
 ### PDF import flow
 The import modal (`modal/import.html`) queues one or more PDFs and, for each file:
-1. `POST /upload/analyze` — multipart file → SHA-256 duplicate check → `spawn_blocking(pdf_extract)` (lopdf fallback) → `parsers::detect_and_parse()` → JSON with the parsed transactions.
-2. `POST /upload/confirm` — the browser sends that JSON straight back → write the file to `STORAGE_PATH/Statements/<BankName>/` → insert the `imported_files` row → insert `transactions` rows (`status = pending`, or `status = broken` for lines the parser could not fully parse).
+1. `POST /upload/analyze` — multipart file (one, ≤ 20 MB: `DefaultBodyLimit` on the route) → PDF check (`.pdf` name, `%PDF-` / `%%EOF` in the content) → SHA-256 duplicate check → same-name check (case-insensitive; files are never renamed, a name already imported is refused) → parse on a blocking thread (`catch_unwind`, 60 s limit; pdf_extract, lopdf fallback) → `parsers::detect_and_parse()`. **A file with any broken line (`parse_note`) is rejected as a whole.** Nothing is written: the result is kept in memory (`PendingUploads` in `AppState`, 30 min) and the browser gets a one-time token.
+2. `POST /upload/confirm` — the browser sends only the token (nothing else it sends is trusted) → in one DB transaction: re-check duplicates, insert the `imported_files` row and the `transactions` rows (`status = pending`), write the file to `STORAGE_PATH/Statements/<BankName>/` and commit (the file is removed if the commit fails).
 
-If the file was already imported, the modal offers `POST /imported-files/:id/reparse`, which re-parses the stored PDF and adds only the missing transactions. Imported files are listed at `/imported-files` (a filterable table: search by file name, filters in `modal/file_filters.html` — import date, bank, importer, number of transactions — sortable columns), where they can also be deleted (with or without their transactions).
+If the file was already imported, the modal offers `POST /imported-files/:id/reparse`, which re-parses the stored PDF and adds only the missing transactions (matched one for one by date, operation and amount, so one of two identical lines can be restored). Imported files are listed at `/imported-files` (a filterable table: search by file name, filters in `modal/file_filters.html` — import date, bank, importer, number of transactions — sortable columns), where they can also be deleted (with or without their transactions).
 
 ### Parser interface
 Each parser lives in `src/parsers/<bank>.rs` and implements `BankParser`:
 - `bank_id()` / `bank_name()` — must match the bank's row in the `banks` table
+- `currency_code()` — ISO code of the statements' currency (`"EUR"` for BNP Paribas and Crédit Mutuel); must exist in `currencies`
 - `detect(&str) -> bool` — look for bank-specific keywords in extracted text
 - `parse(&str) -> Result<Vec<ParsedTransaction>>` — regex-based line parsing
 - `parse_positioned(&[TextItem])` — optional; parse from lopdf positioned text (return `None` to use `parse`)
@@ -108,13 +109,21 @@ Use this to verify column spacing (credit vs debit threshold) against actual PDF
 ### Transactions and shares
 A transaction belongs to an owner (`owner_id`) and is split between users through the `transaction_shares` table (one row per user, `share` in percent). Status (`recalculate_status` in `handlers/transactions.rs`, called after every edit/share change):
 - `pending` — imported or added, still needs a category and shares totalling 100 %
-- `broken` — the parser couldn't extract every field (`parse_note` set); operation/amount must be corrected
+- `broken` — `parse_note` set: a manual transaction whose exchange rate couldn't be fetched (saved with amount 0), or a legacy imported line (imports with broken lines are now rejected). It stays broken until a non-zero amount is entered
 - `complete` — category set and shares sum to exactly 100 %
 
-The `/transactions` page lists every transaction. Search, filters and sorting (every column) are query parameters handled server-side (`TransactionFilter` / `filter_and_sort`; no `year` = current year, `year=all` = all years); the filters modal is `modal/transaction_filters.html` (period, amount, categories, owner, participants, status, source). See **Filterable tables** below. The CSV button in the page header exports the same view via `/transactions/export.csv`. Edit, delete and manual entry are server-rendered modals. Editing an existing transaction (edit modal and carousel, both built on `modal/_transaction_fields.html`) changes only its category, shares and notes; operation and amount can be corrected only on a broken line, and date/currency/owner never change (`update_transaction` ignores anything else). The "À compléter" button opens the carousel over the current user's pending/broken transactions: `GET /transactions/pending` renders one card, and each footer button (`nav` = prev / next / stay / close) posts the card to `POST /transactions/pending/:id`, which saves it and returns the next card (or an empty body to close). Shares are submitted as one `shares_json` field and validated server-side (≤ 100 %). Manual transactions in a foreign currency are converted with the exchange rate of the transaction date (`currency.rs`); the original amount is kept in `foreign_currency_amount` / `foreign_currency_id`.
+The `/transactions` page lists every transaction. Search, filters and sorting (every column) are query parameters handled server-side (`TransactionFilter` / `filter_and_sort`; no `year` = current year, `year=all` = all years); the filters modal is `modal/transaction_filters.html` (period, amount, categories, owner, participants, status, source). See **Filterable tables** below. The CSV button in the page header exports the same view via `/transactions/export.csv` — plain text and numbers only (amount `-12.34`, currency ISO code, original amount, currency and exchange rate, one share column per user; the characters that would start a formula — `=`, `+`, `-`, `@` — are removed from the start of text cells). Edit, delete and manual entry are server-rendered modals. Editing an existing transaction (edit modal and carousel, both built on `modal/_transaction_fields.html`) changes only its category, shares and notes; operation and (original) amount can be corrected only on a broken line, and date/currencies/owner never change (`update_transaction` ignores anything else). The "À compléter" button opens the carousel over the current user's pending/broken transactions: `GET /transactions/pending` renders one card, and each footer button (`nav` = prev / next / stay / close) posts the card to `POST /transactions/pending/:id`, which saves it and returns the next card (or an empty body to close). Shares are submitted as one `shares_json` field and validated server-side (≤ 100 %). Manual transactions need a currency (no default). See **Money and currencies** below.
+
+### Money and currencies
+Amounts are integer cents (`*_cents` columns; `currency::to_cents` / `from_cents` / `convert`), Tricount-style (migration 007):
+- `original_amount_cents` / `original_currency_id` — what really happened (the statement line in the bank's currency, or what the user typed in the currency they picked); never changed by a conversion.
+- `exchange_rate` — original → `currency_id` at the transaction date (1 when the same); `NULL` = no rate found (the transaction is broken; saving it again retries the rate).
+- `amount_cents` / `currency_id` — the value in the default currency, used by balances, chart, filters and sorting.
+
+Rates come from Frankfurter (`currency::Rates::fetch`: one request per currency for the whole date range; weekends/holidays use the last working day), always before `begin()`. A statement whose currency isn't the default is converted at import (a missing rate rejects the file); a manual entry without a rate is saved as broken. Changing the default currency (`transactions::change_default_currency`, from `POST /settings`) recomputes every `amount_cents` from the originals in one DB transaction — if any rate is missing, nothing changes (theme included) and the error is shown.
 
 ### Balance calculation
-The home page uses `complete` transactions only: for each pair of users and each currency it sums what each one paid on the other's behalf (via `transaction_shares`) and shows who owes whom. The stats row, balances card and chart each have their own partial endpoint (`/home/stats-row`, `/home/balances`, `/home/chart-part`) refreshed over SSE.
+The home page uses `complete` transactions in the default currency only (the chart: spending only, negative amounts), and says which currency the amounts are in; transactions still in another currency (from before conversions existed) are counted in a notice, and saving the preferences converts them. For each pair of users it sums what each one paid on the other's behalf (via `transaction_shares`) and shows who owes whom. The stats row, balances card and chart each have their own partial endpoint (`/home/stats-row`, `/home/balances`, `/home/chart-part`) refreshed over SSE.
 
 ## Templates
 
@@ -148,12 +157,12 @@ Writes that take more than one statement run in one DB transaction (`state.db.be
 
 **Backups** (`src/backup.rs`): the app writes a consistent snapshot (`VACUUM INTO`, safe in WAL mode and while running) to `BACKUP_DIR` at startup — before migrations — and every `BACKUP_INTERVAL_HOURS`, keeping the `BACKUP_KEEP` newest `finance_YYYYMMDD_HHMMSS.db`. To restore: stop the app, replace `finance.db` with a backup (delete any `finance.db-wal`/`-shm`), start it. `scripts/backup-db.sh` makes an extra manual copy.
 
-Migrations are in `migrations/` (`001_initial` … `006_admin`) and embedded in the binary via `sqlx::migrate!()`. Schema overview:
+Migrations are in `migrations/` (`001_initial` … `007_amounts_in_cents`) and embedded in the binary via `sqlx::migrate!()`. sqlx runs each migration inside a DB transaction, where `PRAGMA foreign_keys = OFF` has no effect: a migration that rebuilds `transactions` must set `transaction_shares` aside first (as 007 does), or the `ON DELETE CASCADE` deletes every share. Schema overview:
 
 - `users`, `banks`, `currencies`, `categories`, `transaction_status` — reference tables
 - `settings` — key/value store for app preferences (theme, default currency)
 - `imported_files` — one row per imported PDF (plus a synthetic `manual` row that manual transactions point to)
-- `transactions` — one row per transaction; `from_file_id` links to `imported_files`
+- `transactions` — one row per transaction; `from_file_id` links to `imported_files`; amounts in cents, original + converted (see **Money and currencies**)
 - `transaction_shares` — per-user percentage of each transaction
 
 ## Running the app
@@ -166,6 +175,8 @@ docker compose up --build     # first build ~5-10 min; subsequent builds use cac
 ```
 
 Open http://localhost:3000. On first run the login page offers to create the first profile.
+
+Dates follow each **user's** time zone: every page stores the browser's UTC offset in a `tz_offset` cookie (`layout/shell.html`), and handlers take the `clock::UserClock` extractor for today's date, the current year, and to show UTC timestamps from the DB (`imported_at`, `last_login`) in local time. `TZ` (default `America/Toronto`; `tzdata` is in the image) is only the fallback without that cookie, and names the backups.
 
 To change the host port: set `APP_PORT=8080` in `.env` (Docker only — for local runs, change `SERVER_PORT` instead).
 
@@ -190,7 +201,7 @@ cargo run       # data/, storage/, logs/ are created automatically on first run
 
 ## Adding a new bank parser
 
-1. Create `src/parsers/<bank_slug>.rs` implementing `BankParser`
+1. Create `src/parsers/<bank_slug>.rs` implementing `BankParser` (including `currency_code()`, the statements' currency)
 2. Add `pub mod <bank_slug>;` in `src/parsers/mod.rs`
 3. Add the bank to `all_parsers()` in `mod.rs`
 4. Add the bank's seed row in a new migration (its id must match `bank_id()`)

@@ -4,8 +4,9 @@
 /// and take effect immediately without a page reload (HTMX saves silently).
 ///
 /// User management allows creating, editing, and deleting users.  Password changes use
-/// Argon2id hashing, same as the auth flow.  Editing another user's profile (name/bank)
-/// is allowed by any logged-in user, but changing a password requires the old password.
+/// Argon2id hashing, same as the auth flow.  Each user can edit only their own profile
+/// (name, bank, password — changing a password requires the old one); only the admin
+/// deletes users.
 use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
@@ -20,7 +21,7 @@ use argon2::{
     Argon2, PasswordHasher, PasswordVerifier,
 };
 
-use crate::{db::{get_setting, set_setting}, error::{AppError, AppResult}, models::{Bank, Currency, User}, sse::AppEvent, AppState};
+use crate::{clock::UserClock, db::{get_setting, set_setting}, error::{AppError, AppResult}, models::{Bank, Currency, User}, sse::AppEvent, AppState};
 use super::{is_htmx, htmx_inline_error, htmx_redirect, toast_response};
 
 /// Query parameters for the settings page — error messages after a redirect (shown as a toast).
@@ -34,6 +35,7 @@ pub struct SettingsQuery {
 pub async fn get_settings(
     State(state): State<AppState>,
     jar: SignedCookieJar,
+    clock: UserClock,
     Query(query): Query<SettingsQuery>,
 ) -> AppResult<Html<String>> {
     let mut ctx = super::base_context(&jar, &state.db, "/settings").await?;
@@ -44,9 +46,7 @@ pub async fn get_settings(
     let banks = sqlx::query_as::<_, Bank>("SELECT * FROM banks ORDER BY name")
         .fetch_all(&state.db)
         .await?;
-    let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
-        .fetch_all(&state.db)
-        .await?;
+    let users = users_in_local_time(&state, &clock).await?;
 
     let default_currency_id: i64 = get_setting(&state.db, "default_currency_id")
         .await
@@ -64,6 +64,7 @@ pub async fn get_settings(
         (Some("mismatch"), _) => Some("Les nouveaux mots de passe ne correspondent pas."),
         (Some(_), _) => Some("Une erreur est survenue."),
         (_, Some("duplicate")) => Some("Un utilisateur avec ce prénom existe déjà."),
+        (_, Some("noname")) => Some("Le prénom est obligatoire."),
         (_, Some("empty")) => Some("Le mot de passe est obligatoire."),
         (_, Some("mismatch")) => Some("Les mots de passe ne correspondent pas."),
         _ => None,
@@ -94,16 +95,44 @@ pub async fn post_settings(
     let actor_id = super::get_user_id(&jar)?;
     // Sanitize theme — only "dark" or "light" are valid values.
     let theme = if form.theme == "dark" { "dark" } else { "light" };
-    // Both preferences are saved together, or neither.
-    let mut tx = state.db.begin().await?;
-    set_setting(&mut *tx, "theme", theme).await?;
-    set_setting(&mut *tx, "default_currency_id", &form.default_currency_id).await?;
-    tx.commit().await?;
+    let currency_id: Option<i64> = match form.default_currency_id.parse::<i64>() {
+        Ok(id) => sqlx::query_scalar("SELECT id FROM currencies WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?,
+        Err(_) => None,
+    };
+    let currency_id = currency_id.ok_or_else(|| AppError::Other("Devise inconnue.".into()))?;
+
+    // A new default currency converts every transaction first (exchange rates at each
+    // transaction's date). If that fails nothing is saved — the theme neither — and the
+    // error shows as a toast (the form keeps the old values).
+    // Also when some transactions are still in another currency (from before conversions
+    // existed): saving the preferences converts them.
+    let unconverted: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM transactions WHERE currency_id != ?)")
+        .bind(currency_id)
+        .fetch_one(&state.db)
+        .await?;
+    let mut converted = None;
+    if unconverted || currency_id != crate::currency::default_currency_id(&state.db).await {
+        match super::transactions::change_default_currency(&state, currency_id).await? {
+            Ok(count) => converted = Some(count),
+            Err(msg) => return Err(AppError::Other(msg)),
+        }
+    }
+    set_setting(&state.db, "theme", theme).await?;
 
     state.events.send(AppEvent { kind: "settings", actor_id });
+    if converted.is_some() {
+        state.events.send(AppEvent { kind: "transactions", actor_id });
+    }
 
     if is_htmx(&headers) {
-        Ok(toast_response("Préférences enregistrées.", true, &[]))
+        let msg = match converted {
+            Some(count) => format!("Préférences enregistrées — {} transaction(s) converties dans la nouvelle devise.", count),
+            None => "Préférences enregistrées.".to_string(),
+        };
+        Ok(toast_response(&msg, true, &["transactions-changed"]))
     } else {
         Ok(Redirect::to("/settings").into_response())
     }
@@ -150,11 +179,21 @@ pub async fn post_new_user(
     if user_count > 0 {
         super::get_user_id(&jar)?;
     }
+    let name = form.name.trim();
+    if name.is_empty() {
+        if htmx {
+            return Ok(toast_response("Le prénom est obligatoire.", false, &[]));
+        }
+        return Ok(Redirect::to(match form.redirect_to.as_deref() {
+            Some("/login") => "/login?user_error=noname",
+            _ => "/settings?user_error=noname",
+        }).into_response());
+    }
     // Case-insensitive duplicate check on first name.
     let duplicate: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM users WHERE LOWER(name) = LOWER(?)"
     )
-    .bind(&form.name)
+    .bind(name)
     .fetch_optional(&state.db)
     .await?;
 
@@ -203,7 +242,7 @@ pub async fn post_new_user(
     let result = sqlx::query(
         "INSERT INTO users (name, last_name, bank_id, password_hash, is_admin) VALUES (?, ?, ?, ?, ?)",
     )
-    .bind(&form.name)
+    .bind(name)
     .bind(empty_last_name)
     .bind(parse_bank_id(&form.bank_id))
     .bind(&password_hash)
@@ -249,9 +288,31 @@ pub async fn post_edit_user(
     Form(form): Form<EditUserForm>,
 ) -> AppResult<impl IntoResponse> {
     let htmx = is_htmx(&headers);
-    super::get_user_id(&jar)?;
+    if super::get_user_id(&jar)? != id {
+        return Err(AppError::Other("Vous ne pouvez modifier que votre propre profil.".into()));
+    }
     // Treat empty string last_name as None (empty <input> submits "").
-    let last_name = form.last_name.as_deref().filter(|s| !s.is_empty());
+    let last_name = form.last_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let name = form.name.trim();
+    let name_error = if name.is_empty() {
+        Some("Le prénom est obligatoire.")
+    } else {
+        let duplicate: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE LOWER(name) = LOWER(?) AND id != ?)",
+        )
+        .bind(name)
+        .bind(id)
+        .fetch_one(&state.db)
+        .await?;
+        duplicate.then_some("Un utilisateur avec ce prénom existe déjà.")
+    };
+    if let Some(msg) = name_error {
+        return if htmx {
+            Ok(htmx_inline_error("#edit-user-error", msg))
+        } else {
+            Ok(Redirect::to("/settings?user_error=duplicate").into_response())
+        };
+    }
 
     // Password change is optional — only run this block if a new password was supplied.
     // All checks happen before anything is written, so a rejected password change
@@ -304,7 +365,7 @@ pub async fn post_edit_user(
         "UPDATE users SET name = ?, last_name = ?, bank_id = ?, \
          password_hash = COALESCE(?, password_hash) WHERE id = ?"
     )
-    .bind(&form.name)
+    .bind(name)
     .bind(last_name)
     .bind(parse_bank_id(&form.bank_id))
     .bind(&new_hash)
@@ -359,13 +420,16 @@ pub async fn get_delete_user_modal(
     Ok(Html(state.tera.render("modal/user_delete.html", &ctx)?))
 }
 
-/// GET /settings/users/:id/edit — the edit-user modal (loaded into `#modal-root`).
+/// GET /settings/users/:id/edit — the edit-user modal (loaded into `#modal-root`); only
+/// for the logged-in user's own profile.
 pub async fn get_edit_user_modal(
     State(state): State<AppState>,
     jar: SignedCookieJar,
     Path(id): Path<i64>,
 ) -> AppResult<Html<String>> {
-    super::get_user_id(&jar)?;
+    if super::get_user_id(&jar)? != id {
+        return Err(AppError::Other("Vous ne pouvez modifier que votre propre profil.".into()));
+    }
     let u = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
         .bind(id)
         .fetch_optional(&state.db)
@@ -389,11 +453,13 @@ pub async fn get_edit_user_modal(
 
 /// GET /settings/users — the users table fragment (`_users_table.html`), re-fetched
 /// whole after any user is added, edited or deleted.
-pub async fn get_users_table(State(state): State<AppState>, jar: SignedCookieJar) -> AppResult<Html<String>> {
+pub async fn get_users_table(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    clock: UserClock,
+) -> AppResult<Html<String>> {
     let viewer = super::get_current_user(&jar, &state.db).await?;
-    let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
-        .fetch_all(&state.db)
-        .await?;
+    let users = users_in_local_time(&state, &clock).await?;
     let banks = sqlx::query_as::<_, Bank>("SELECT * FROM banks ORDER BY name")
         .fetch_all(&state.db)
         .await?;
@@ -468,4 +534,15 @@ pub async fn delete_user(
     } else {
         Ok(Redirect::to("/settings").into_response())
     }
+}
+
+/// Every user, with `last_login` (stored in UTC) in the viewer's local time.
+async fn users_in_local_time(state: &AppState, clock: &UserClock) -> AppResult<Vec<User>> {
+    let mut users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY name")
+        .fetch_all(&state.db)
+        .await?;
+    for u in &mut users {
+        u.last_login = u.last_login.as_deref().map(|t| clock.local(t));
+    }
+    Ok(users)
 }

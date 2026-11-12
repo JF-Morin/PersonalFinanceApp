@@ -8,6 +8,7 @@ pub struct BnpParibasParser;
 impl BankParser for BnpParibasParser {
     fn bank_id(&self) -> i64 { 1 }
     fn bank_name(&self) -> &str { "BNP Paribas" }
+    fn currency_code(&self) -> &str { "EUR" }
 
     fn prefers_positioned(&self) -> bool { true }
 
